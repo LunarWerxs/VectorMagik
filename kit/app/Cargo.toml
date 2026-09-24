@@ -2,7 +2,7 @@
 # Integration tests share ONE executable (tests/integration.rs, see its header).
 autotests = false
 name = "vector-magic-rebuild"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
 publish = false
@@ -13,7 +13,10 @@ default-run = "vector-magic-rebuild"
 # The SVG renderer alone: the Auto simplify tolerance compares renderings,
 # and the browser build (kit/web) needs it without the window.
 render = ["dep:resvg"]
-desktop = ["dep:eframe", "render"]
+# The app's window code without a window: the desktop runs it with eframe,
+# the browser build (kit/web) with a canvas.
+ui = ["render", "dep:egui"]
+desktop = ["ui", "dep:eframe"]
 ui-test = ["desktop"]
 profile = ["vector-rebuild/profile"]
 
@@ -35,6 +38,7 @@ required-features = ["desktop"]
 vector-rebuild = { path = "../rust" }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "pnm"] }
 eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "glow"], optional = true }
+egui = { version = "=0.33.3", default-features = false, features = ["default_fonts"], optional = true }
 resvg = { version = "=0.48.1", default-features = false, optional = true }
 # PDF streams (pdf_eps.rs); already in the build through image's PNG codec.
 miniz_oxide = "=0.8.9"

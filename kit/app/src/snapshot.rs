@@ -176,6 +176,9 @@ pub struct Options {
     pub prep: crate::Preparation,
     /// Corners to round after converting: the node nearest each point.
     pub rounds: Vec<(f64, f64, crate::desktop_ui::Reach)>,
+    /// Nodes to delete after converting (and rounding): the shown node
+    /// nearest each point, keeping the shape when the flag is set.
+    pub deletes: Vec<(f64, f64, bool)>,
     /// The Conversion card's "Smooth joins" switch (the engine's optional pass).
     pub optimizer: bool,
     /// The Sticker card: off, on as the desktop sizes it, or on with settings.
@@ -217,6 +220,7 @@ impl Default for Options {
             overlay: None,
             prep: crate::Preparation::default(),
             rounds: Vec::new(),
+            deletes: Vec::new(),
             optimizer: false,
             sticker: crate::desktop_ui::StickerChoice::Off,
             straighten: Some(crate::desktop_ui::Bow::Auto),
@@ -268,6 +272,13 @@ pub fn render(input: Option<&Path>, options: Options) -> Result<image::RgbaImage
             &ctx,
             vector_rebuild::geometry::Point { x: *x, y: *y },
             *reach,
+        )?;
+    }
+    for (x, y, keep_shape) in &options.deletes {
+        app.delete_nearest_now(
+            &ctx,
+            vector_rebuild::geometry::Point { x: *x, y: *y },
+            *keep_shape,
         )?;
     }
     if let Some(overlay) = options.overlay {

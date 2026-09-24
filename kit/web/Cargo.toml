@@ -1,9 +1,9 @@
 [package]
 name = "vectormagik-web"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
-description = "VectorMagik's engine for the browser: the desktop's conversion chain as WebAssembly, run in a Web Worker"
+description = "VectorMagik in the browser: the desktop app as WebAssembly, drawn on a canvas"
 publish = false
 
 [lib]
@@ -11,9 +11,8 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
-vector-magic-rebuild = { path = "../app", default-features = false, features = ["render"] }
-vector-rebuild = { path = "../rust" }
-image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "pnm"] }
+vector-magic-rebuild = { path = "../app", default-features = false, features = ["ui"] }
+egui = { version = "=0.33.3", default-features = false, features = ["default_fonts"] }
 
 [profile.release]
 opt-level = 3

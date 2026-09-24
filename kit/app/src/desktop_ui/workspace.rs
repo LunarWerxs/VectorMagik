@@ -351,7 +351,8 @@ impl Desktop {
                 let uv = egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.));
                 painter.image(texture.id(), rect, uv, Color32::WHITE);
                 if let Some(tile) = tile {
-                    let ratio = scale / tile.key.scale;
+                    // The tile's pixels are the display's: `ppp` to a point.
+                    let ratio = scale / (tile.key.scale * tile.key.ppp);
                     let min = rect.min + Vec2::new(tile.key.origin[0], tile.key.origin[1]) * scale;
                     let tile_size =
                         Vec2::new(tile.key.size[0] as f32, tile.key.size[1] as f32) * ratio;
@@ -554,7 +555,10 @@ impl Desktop {
         }
         if vector {
             let cap = ui.ctx().input(|i| i.max_texture_side) as u32;
-            self.request_tile(scale, size, viewport, cap);
+            let ppp = ui.ctx().pixels_per_point();
+            if let Some(wait) = self.request_tile(scale, ppp, size, viewport, cap) {
+                ui.ctx().request_repaint_after(wait);
+            }
             if pannable {
                 self.minimap(ui, &texture, area, size, viewport);
             }
@@ -649,18 +653,31 @@ impl Desktop {
     /// Ask the render thread for a crisp tile of the visible part of the
     /// vector whenever the display scale exceeds the base preview's, and only
     /// when the current tile does not already cover the view at that scale.
-    /// A tile is at most `MAX_TILE_SIDE`, and `cap` (the GPU's limit), per side.
-    pub(super) fn request_tile(&mut self, scale: f32, size: Vec2, viewport: Vec2, cap: u32) {
+    /// A tile is at most `MAX_TILE_SIDE`, and `cap` (the GPU's limit), per side,
+    /// in the display's pixels, `ppp` to a point. Where the view must rest
+    /// first (`platform::TILE_REST`), how much longer before asking again.
+    pub(super) fn request_tile(
+        &mut self,
+        scale: f32,
+        ppp: f32,
+        size: Vec2,
+        viewport: Vec2,
+        cap: u32,
+    ) -> Option<Duration> {
         let (Some(shown), Some(preview), Some(raster)) = (&self.shown, &self.preview, &self.raster)
         else {
-            return;
+            return None;
         };
+        let shown = Arc::clone(shown);
         let picture_width = raster.width as f32 + 2. * self.picture_margin();
         let base_scale = preview.size()[0] as f32 / picture_width.max(1.);
-        if scale <= base_scale * 1.02 {
+        let ppp = if ppp.is_finite() && ppp > 0. { ppp } else { 1. };
+        // Display pixels per picture pixel: past the preview's, a tile.
+        let pixels = scale * ppp;
+        if pixels <= base_scale * 1.02 {
             self.tile = None;
             self.tile_pending = None;
-            return;
+            return None;
         }
         let padded = size.max(viewport);
         let pad = (padded - size) / 2.;
@@ -669,7 +686,7 @@ impl Desktop {
         let side = MAX_TILE_SIDE.min(cap).max(1) as f32;
         // What one tile can hold, in picture pixels; a view wider than that
         // gets its first `reach` sharp and the rest from the preview.
-        let reach = Vec2::splat((side - 2.) / scale);
+        let reach = Vec2::splat((side - 2.) / pixels);
         let need_max = view_max.min(view_min + reach);
         let spare = ((reach - (need_max - view_min)) / 2.).max(Vec2::ZERO);
         let margin = ((view_max - view_min) * 0.25).min(spare);
@@ -678,35 +695,63 @@ impl Desktop {
         let covered = |key: &TileKey| {
             key.version == self.document_version
                 && (key.scale - scale).abs() < 1e-3
+                && (key.ppp - ppp).abs() < 1e-3
                 && key.origin[0] <= view_min.x
                 && key.origin[1] <= view_min.y
-                && key.origin[0] + key.size[0] as f32 / scale >= need_max.x - 0.5
-                && key.origin[1] + key.size[1] as f32 / scale >= need_max.y - 0.5
+                && key.origin[0] + key.size[0] as f32 / pixels >= need_max.x - 0.5
+                && key.origin[1] + key.size[1] as f32 / pixels >= need_max.y - 0.5
         };
         if self.tile.as_ref().is_some_and(|t| covered(&t.key))
             || self.tile_pending.as_ref().is_some_and(covered)
         {
-            return;
+            return None;
         }
-        let width = ((want_max.x - want_min.x) * scale).ceil().clamp(1., side);
-        let height = ((want_max.y - want_min.y) * scale).ceil().clamp(1., side);
+        let width = ((want_max.x - want_min.x) * pixels).ceil().clamp(1., side);
+        let height = ((want_max.y - want_min.y) * pixels).ceil().clamp(1., side);
         let key = TileKey {
             version: self.document_version,
             scale,
+            ppp,
             origin: [want_min.x, want_min.y],
             size: [width as u32, height as u32],
         };
+        if let Some(wait) = self.tile_rest(key) {
+            return Some(wait);
+        }
         if let Some((sender, _)) = &self.tiler {
             let request = TileRequest {
                 version: key.version,
-                svg: Arc::clone(shown),
+                svg: shown,
                 document_width: picture_width,
                 scale: key.scale,
+                ppp: key.ppp,
                 origin: key.origin,
                 size: key.size,
             };
             if sender.send(request).is_ok() {
                 self.tile_pending = Some(key);
+            }
+        }
+        None
+    }
+
+    /// Whether the tile `key` must wait for the view to rest, and how much
+    /// longer: in a tab a tile renders before the next frame is painted, so
+    /// asking on every step of a zoom or a pan would render one per step
+    /// (`platform::TILE_REST`; none in the window, whose render thread keeps
+    /// only the latest request).
+    fn tile_rest(&mut self, key: TileKey) -> Option<Duration> {
+        if platform::TILE_REST.is_zero() {
+            return None;
+        }
+        match &self.tile_wanted {
+            Some((wanted, since)) if *wanted == key => {
+                let waited = since.elapsed();
+                (waited < platform::TILE_REST).then(|| platform::TILE_REST - waited)
+            }
+            _ => {
+                self.tile_wanted = Some((key, Stopwatch::start()));
+                Some(platform::TILE_REST)
             }
         }
     }
@@ -726,6 +771,7 @@ impl Desktop {
             let key = TileKey {
                 version: result.version,
                 scale: result.scale,
+                ppp: result.ppp,
                 origin: result.origin,
                 size: [result.image.size[0] as u32, result.image.size[1] as u32],
             };
@@ -859,19 +905,26 @@ impl Desktop {
     }
 }
 
-/// A node's marker: a dot for a rounded corner, a square for a sharp one,
-/// both ringed.
+/// A node's marker: a hollow circle for a rounded corner, a hollow square
+/// for any other node, in the node colour over a faint shadow so it shows on
+/// light and dark fills alike. Hollow, so the edge it sits on runs on
+/// through it: the filled dot with a dark ring it replaced, centred on a
+/// black and white edge, merged its ring with the black and bit into the
+/// fill, and a smooth curve read as turning back at every node (the owner,
+/// September 24, 2026; testing/node-markers-2026-09-24).
 fn node_marker(painter: &egui::Painter, screen: egui::Pos2, smooth: bool) {
+    let shadow = Stroke::new(3_f32, NODE_SHADOW);
     if smooth {
-        painter.circle_filled(screen, 3.5, NODE_SMOOTH);
-        painter.circle_stroke(screen, 3.5, Stroke::new(1_f32, NODE_RING));
-    } else {
-        painter.rect_filled(
-            egui::Rect::from_center_size(screen, Vec2::splat(6.)),
-            0.,
-            NODE,
+        painter.circle_stroke(screen, NODE_MARKER_RADIUS, shadow);
+        painter.circle_stroke(
+            screen,
+            NODE_MARKER_RADIUS,
+            Stroke::new(1.25_f32, NODE_SMOOTH),
         );
-        painter.circle_stroke(screen, 3.5, Stroke::new(1_f32, NODE_RING));
+    } else {
+        let square = egui::Rect::from_center_size(screen, Vec2::splat(2. * NODE_MARKER_RADIUS));
+        painter.rect_stroke(square, 0., shadow, StrokeKind::Middle);
+        painter.rect_stroke(square, 0., Stroke::new(1.25_f32, NODE), StrokeKind::Middle);
     }
 }
 

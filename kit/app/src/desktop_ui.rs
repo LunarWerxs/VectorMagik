@@ -16,7 +16,7 @@
 //! `snapshot.rs`.
 use crate::engine::{Document as VectorDocument, Options as VectorizeOptions, Sliders};
 use crate::{Preparation, Recolor};
-use eframe::egui::{
+use egui::{
     self, Align2, Color32, CornerRadius, FontFamily, FontId, Key, KeyboardShortcut, Margin,
     Modifiers, RichText, Stroke, StrokeKind, TextStyle, Vec2,
 };
@@ -24,9 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use vector_rebuild::clock::Stopwatch;
 use vector_rebuild::geometry::Point;
-use vector_rebuild::nodes::{NodeMove, NodePiece};
+use vector_rebuild::nodes::{NodeDeletion, NodeMove, NodePiece};
 use vector_rebuild::raster::Raster;
 use vector_rebuild::regularize::RegularizeOptions;
 use vector_rebuild::shapes::{self, Island, Removal};
@@ -57,7 +58,10 @@ const NODE: Color32 = Color32::from_rgb(64, 205, 255);
 const NODE_SMOOTH: Color32 = Color32::from_rgb(140, 230, 120);
 const SHAPE_HOVER: Color32 = Color32::from_rgb(255, 255, 255);
 const SHAPE_SELECTED: Color32 = Color32::from_rgb(255, 184, 76);
-const NODE_RING: Color32 = Color32::from_rgb(10, 40, 60);
+/// Under a node marker's outline, so it reads on white as well as on black.
+const NODE_SHADOW: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 120);
+/// Half the side of a node marker's square, the radius of its circle.
+const NODE_MARKER_RADIUS: f32 = 3.5;
 const CHECKER_LIGHT: Color32 = Color32::from_gray(52);
 const CHECKER_DARK: Color32 = Color32::from_gray(40);
 
@@ -288,6 +292,7 @@ struct Edits {
     rounded: Vec<Rounded>,
     straightened: Vec<Point>,
     moved: Vec<NodeMove>,
+    deleted_nodes: Vec<NodeDeletion>,
     deleted: Vec<Removal>,
     prep: Preparation,
     conversion: ConversionSettings,
@@ -378,6 +383,10 @@ impl Format {
         }
     }
     /// The position in the save dialog's filter list.
+    #[cfg_attr(
+        not(windows),
+        allow(dead_code, reason = "only the Windows system dialogs use it")
+    )]
     fn filter_index(self) -> u32 {
         match self {
             Format::Svg => 1,
@@ -390,6 +399,20 @@ impl Format {
             2 => Format::Pdf,
             3 => Format::Eps,
             _ => Format::Svg,
+        }
+    }
+    fn kind(self) -> crate::export::OutputKind {
+        match self {
+            Format::Svg => crate::export::OutputKind::Svg,
+            Format::Pdf => crate::export::OutputKind::Pdf,
+            Format::Eps => crate::export::OutputKind::Eps,
+        }
+    }
+    fn mime(self) -> &'static str {
+        match self {
+            Format::Svg => "image/svg+xml",
+            Format::Pdf => "application/pdf",
+            Format::Eps => "application/postscript",
         }
     }
 }
@@ -472,6 +495,13 @@ struct StageKey {
     stacked: bool,
 }
 /// Whether the staged file can be dragged out yet.
+#[cfg_attr(
+    not(feature = "desktop"),
+    allow(
+        dead_code,
+        reason = "the browser downloads the file instead of dragging it"
+    )
+)]
 enum StageState {
     Writing,
     Ready(PathBuf),
@@ -486,18 +516,24 @@ struct ColourDrop {
     working: Arc<Raster>,
 }
 
-/// One crisp rendering of part of the vector at a display scale.
+/// One crisp rendering of part of the vector at a display scale (`scale`
+/// points per picture pixel), in the display's own pixels: `ppp` of them per
+/// point, so a display scaled to 150% or 200% gets a sharp picture rather
+/// than one stretched from a texture of one pixel per point. `size` is in
+/// those pixels.
 struct TileRequest {
     version: u64,
     svg: Arc<String>,
     document_width: f32,
     scale: f32,
+    ppp: f32,
     origin: [f32; 2],
     size: [u32; 2],
 }
 struct TileResult {
     version: u64,
     scale: f32,
+    ppp: f32,
     origin: [f32; 2],
     image: egui::ColorImage,
 }
@@ -505,6 +541,7 @@ struct TileResult {
 struct TileKey {
     version: u64,
     scale: f32,
+    ppp: f32,
     origin: [f32; 2],
     size: [u32; 2],
 }
@@ -556,12 +593,16 @@ const CANCELLED: &str = "Conversion cancelled.";
 #[derive(Clone, Debug, PartialEq)]
 struct DeriveSettings {
     simplify: Option<f64>,
+    /// The tolerance is the slider's, not Auto's pick: the kinks the merges
+    /// keep are smoothed too (`VectorDocument::simplified_by_hand`).
+    simplify_by_hand: bool,
     deleted: Vec<Removal>,
     regularize: Option<RegularizeOptions>,
     primitives: bool,
     straighten: Option<StraightenOptions>,
     straightened: Vec<Point>,
     moved: Vec<NodeMove>,
+    deleted_nodes: Vec<NodeDeletion>,
     rounded: Vec<Rounding>,
     sticker: Option<Sticker>,
 }
@@ -744,10 +785,16 @@ pub struct Desktop {
     /// Nodes the user dragged elsewhere, applied after the Curves card's
     /// passes and before the rounding (`Desktop::finish`).
     moved: Vec<NodeMove>,
+    /// Nodes the user deleted from their right-click menu, keyed where the
+    /// moves left them: applied after the moves and before the rounding.
+    deleted_nodes: Vec<NodeDeletion>,
     /// The node marker being dragged, if one is.
     node_drag: Option<NodeDrag>,
     /// The right-clicked node and where its menu opened.
     node_menu: Option<(Point, egui::Pos2)>,
+    /// Whether the node with the menu open may be deleted, worked out once
+    /// per node and document version: the reason it may not, or `None`.
+    deletable: Option<(u64, Point, Option<&'static str>)>,
     /// Undo and Redo: the edits before each change, the ones undone, and the
     /// edits as last recorded.
     undo: Vec<Edits>,
@@ -761,7 +808,7 @@ pub struct Desktop {
     converted_inputs: Option<ConversionInputs>,
     /// Settings that differ from `converted_inputs`, and since when they
     /// have been as they are: Convert automatically waits for them to rest.
-    inputs_changed: Option<(ConversionInputs, Instant)>,
+    inputs_changed: Option<(ConversionInputs, Stopwatch)>,
     /// The settings of a conversion the user cancelled: Convert
     /// automatically leaves them alone until they change.
     held_inputs: Option<ConversionInputs>,
@@ -819,6 +866,9 @@ pub struct Desktop {
     preview: Option<egui::TextureHandle>,
     tile: Option<Tile>,
     tile_pending: Option<TileKey>,
+    /// The tile the view last wanted and since when, while it rests before
+    /// asking (`platform::TILE_REST`).
+    tile_wanted: Option<(TileKey, Stopwatch)>,
     tiler: Option<(Sender<TileRequest>, Receiver<TileResult>)>,
     logo: Option<egui::TextureHandle>,
     worker: Option<Receiver<JobResult>>,
@@ -835,7 +885,7 @@ pub struct Desktop {
     staged: Option<Staged>,
     status: String,
     status_kind: StatusKind,
-    started: Instant,
+    started: Stopwatch,
     elapsed: Option<f64>,
     zoom: f32,
     fit: f32,
@@ -872,6 +922,7 @@ mod cards;
 mod chrome;
 mod edits;
 mod headless;
+pub mod platform;
 mod prefs;
 mod state;
 #[cfg(test)]
@@ -881,6 +932,7 @@ mod workspace;
 
 use widgets::*;
 
+#[cfg(feature = "desktop")]
 impl eframe::App for Desktop {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ui(ctx);
@@ -891,6 +943,7 @@ impl eframe::App for Desktop {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub fn run() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("VectorMagik")

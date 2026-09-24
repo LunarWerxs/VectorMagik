@@ -14,7 +14,7 @@ PNG, JPEG, GIF, BMP and PNM are supported. Default: blended artwork, high source
 Opaque photographs use seam overlap; --photo-seams native keeps the engine's own output.
 --defaults improved|original: at high quality, photographs trace at the original's advanced-mode detail ceiling (12,6,6) and blended artwork at its advanced mode with segmentation detail 11 and smoothness 3 (11,3,6), both measured better than the basic presets (improved, the default); original keeps the original's basic presets byte for byte.
 No original binary, host process or extracted engine is needed; nothing is downloaded.
---simplify 0.5 merges neighbouring curve pieces of the output within that many source pixels (owned post-processing, off by default); --simplify auto picks the tolerance as the desktop's Auto does: the largest candidate from 0.1 up to 0.5 (aliased artwork), 0.3 (anti-aliased artwork) or 0.1 (photographs) whose rendering changes at most 0.6% of the preview pixels (the statistics report it as \"simplify\"). The desktop's chain is --category auto --quality auto --simplify auto --regularize 0.8 --straighten auto --primitives on --stack on.
+--simplify 0.5 merges neighbouring curve pieces of the output within that many source pixels and smooths the small kinks left between them, turns under 20 degrees (owned post-processing, off by default); --simplify auto picks the tolerance as the desktop's Auto does: the largest candidate from 0.1 up to 0.5 (aliased artwork), 0.3 (anti-aliased artwork) or 0.1 (photographs) whose rendering changes at most 0.6% of the preview pixels (the statistics report it as \"simplify\"). The desktop's chain is --category auto --quality auto --simplify auto --regularize 0.8 --straighten auto --primitives on --stack on.
 --colors N limits the image to N colours before tracing; --background white|black|#rrggbb flattens transparency onto that colour first (both owned preparation, off by default).
 --optimizer on runs the engine's optional tangent-continuity Newton pass (BezierFitter+0x1c; off in every preset).
 --advanced SEG,SMOOTH,CURVE[,corners=on|off][,aa=on|off][,minpix=N] runs the original's advanced mode instead of the basic preset (--advanced preset: the basic preset, where the improved defaults would run the advanced mode): segmentation complexity, contour smoothness and curve complexity from 1 to 12 (the original's defaults are 5, 6, 6), corner detection, anti-aliasing (on for blended artwork unless said otherwise) and the minimum region size in pixels.
@@ -300,7 +300,7 @@ fn run_engine(
         doc = doc.snapped(&palette, None);
     }
     match simplify {
-        Some(Simplify::Tolerance(tolerance)) => doc = doc.simplified(tolerance)?,
+        Some(Simplify::Tolerance(tolerance)) => doc = doc.simplified_by_hand(tolerance)?,
         #[cfg(feature = "render")]
         Some(Simplify::Auto) => doc = vector_magic_rebuild::auto_simplify_tolerance(&doc)?.1,
         #[cfg(not(feature = "render"))]

@@ -6,7 +6,7 @@
 
 ### Pictures in, clean vectors out.
 
-Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. Offline on Windows, or right in your browser.
+Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, or the very same app right in your browser.
 
 [![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows11&logoColor=white)](#download)
 [![In your browser](https://img.shields.io/badge/runs%20in%20your%20browser-WebAssembly-654FF0?logo=webassembly&logoColor=white)](https://vectormagik.lunarwerx.com/app/)
@@ -19,7 +19,7 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. Offline on Windo
 
 <br/>
 
-<img src="docs/demo.gif" alt="VectorMagik in the browser: a logo is traced into a vector, then flipped between the picture and the vector and simplified with a slider" width="840" />
+<img src="docs/demo.gif" alt="VectorMagik in the browser: a logo is opened and traced, a corner rounded from its node menu, the picture and the vector compared, and the Save popup opened" width="840" />
 
 </div>
 
@@ -29,8 +29,8 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. Offline on Windo
 
 - 🎯 **Auto settings.** It works out whether you gave it a logo, pixel art or a photo, and traces it the right way.
 - ⭕ **Clean geometry.** Circles come out as circles, lines as lines, and shapes the pixels clearly show (rectangles, ellipses, rounded corners) as those shapes.
-- ✏️ **Finish by hand** (Windows app). Show the nodes, round a corner, drag a node, delete or merge shapes. Ctrl+Z undoes anything.
-- 🌐 **Runs in your browser, too.** The same engine as WebAssembly: your picture never leaves your computer.
+- ✏️ **Finish by hand.** Show the nodes, round a corner, drag or delete a node, delete or merge shapes. Ctrl+Z undoes anything.
+- 🌐 **The whole app in your browser, too.** The Windows app itself, compiled to WebAssembly: your picture never leaves your computer.
 - 🔒 **Offline.** No account, no upload, no telemetry.
 - 🧾 **Free** for personal use under PolyForm Noncommercial.
 
@@ -44,7 +44,7 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. Offline on Windo
 
 **[VectorMagik for Windows (x64)](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-windows-x64.zip)**: unzip it anywhere and run `VectorMagik.exe`. No installer. Windows may warn about an unrecognised app the first time; choose *More info* then *Run anyway*.
 
-No Windows? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.com/app/)**: the same tracing, on your own computer.
+No Windows? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.com/app/)**: the same app, on your own computer. The Windows app adds working with no internet at all, dragging the file straight out of the window, the command line and pictures up to 100 megapixels (50 in a tab).
 
 ## What it does
 
@@ -54,7 +54,7 @@ No Windows? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.c
 <td width="50%"><img src="docs/side-by-side.png" alt="A photograph and its vector side by side" /></td>
 </tr>
 <tr>
-<td><b>Every node, yours to edit.</b> Click a corner to round it (Tiny, Tight, Medium or Wide), drag a node to move it, right-click to put it back.</td>
+<td><b>Every node, yours to edit.</b> Click a corner to round it (Tiny, Tight, Medium or Wide), drag a node to move it, right-click to put it back or delete it (keeping the shape if you like).</td>
 <td><b>Logos, pixel art and photos.</b> Each kind gets its own tracing, with the colors taken from the pixels themselves.</td>
 </tr>
 </table>
@@ -85,13 +85,13 @@ cargo test --release --manifest-path kit/rust/Cargo.toml
 cargo test --release --manifest-path kit/app/Cargo.toml --features desktop
 ```
 
-The programs land in `kit/app/target/release/`. The browser engine is `kit/web`: `cargo build --release --manifest-path kit/web/Cargo.toml --target wasm32-unknown-unknown`, loaded by `kit/web/js/engine.mjs` and run in a Web Worker (`kit/web/js/worker.mjs`); `node kit/web/js/test.mjs path/to/vectormagik_web.wasm` checks it against the app's drawings.
+The programs land in `kit/app/target/release/`. The browser build is `kit/web`, the desktop's window code without the window: `cargo build --release --manifest-path kit/web/Cargo.toml --target wasm32-unknown-unknown`, drawn on a canvas by `kit/web/js/app.mjs` (a small WebGL painter, nothing else); `node kit/web/js/test.mjs path/to/vectormagik_web.wasm` drives it the way a page does and checks its drawings against the command line's.
 
 ## How it works
 
 VectorMagik is an independent reimplementation, in Rust, of the tracing engine of Vector Magic's desktop program, reconstructed stage by stage from the original program (segmentation, contour construction, smoothing, curve fitting and export) and checked against it: under `--defaults original` it reproduces the original's output byte for byte on the reference pictures in `kit/fixtures/reference`. On top of that engine it adds its own improvements, each measured before it became a default: better tracing settings, true lines, circles and shapes, straightening, simplification that keeps circles round, fills taken from the pixels, and the editor.
 
-The browser build is the same Rust, compiled to WebAssembly. It draws the same file as the Windows app, byte for byte, on 51 of the 52 test pictures; the 52nd draws the same rectangle starting from a different corner.
+The browser version is the same Rust, window code included, compiled to WebAssembly. It draws the same file as the Windows app, byte for byte, on 51 of the 52 test pictures; the 52nd draws the same rectangle starting from a different corner.
 
 VectorMagik is not affiliated with, endorsed by or connected to Vector Magic, Inc. "Vector Magic" is their trademark. It contains none of the original program's machine code or files.
 

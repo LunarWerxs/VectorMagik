@@ -322,9 +322,21 @@ impl Document {
     /// cubic stays within `tolerance` source pixels of the engine's fit. Owned
     /// post-processing; the engine's output is left untouched in `self`.
     pub fn simplified(&self, tolerance: f64) -> Result<Self, String> {
+        self.simplified_with(tolerance, false)
+    }
+    /// `simplified` for a tolerance chosen by hand (the Simplify slider, the
+    /// command line's `--simplify N`): the kinks the merges keep are
+    /// smoothed within it too (`vector_rebuild::simplify::smooth_kinks`).
+    pub fn simplified_by_hand(&self, tolerance: f64) -> Result<Self, String> {
+        self.simplified_with(tolerance, true)
+    }
+    fn simplified_with(&self, tolerance: f64, smooth_kinks: bool) -> Result<Self, String> {
         let (svg, _) = vector_rebuild::simplify::simplify_svg(
             &self.svg,
-            vector_rebuild::simplify::SimplifyOptions { tolerance },
+            vector_rebuild::simplify::SimplifyOptions {
+                tolerance,
+                smooth_kinks,
+            },
         )?;
         Ok(Self {
             svg,
@@ -354,6 +366,23 @@ impl Document {
             return Ok(self.clone());
         }
         let (svg, _) = vector_rebuild::nodes::move_nodes(&self.svg, moves)?;
+        Ok(Self {
+            svg,
+            ..self.clone()
+        })
+    }
+    /// The same document with the listed nodes deleted by hand, their two
+    /// pieces joined into one in every outline through them
+    /// (`vector_rebuild::nodes::delete_nodes`); a node no longer in the
+    /// document, or no longer deletable, is skipped.
+    pub fn without_nodes(
+        &self,
+        deletions: &[vector_rebuild::nodes::NodeDeletion],
+    ) -> Result<Self, String> {
+        if deletions.is_empty() {
+            return Ok(self.clone());
+        }
+        let (svg, _) = vector_rebuild::nodes::delete_nodes(&self.svg, deletions)?;
         Ok(Self {
             svg,
             ..self.clone()

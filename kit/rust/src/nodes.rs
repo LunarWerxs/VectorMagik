@@ -1,13 +1,16 @@
 //! Hand edits of single anchor nodes: a node moved to where the user dropped
-//! it. A node is found by its exact coordinates (`simplify::key`), the way
-//! rounding and straightening find theirs, so every outline passing through
-//! it (both sides of an edge two fills share, every boundary of a junction)
-//! moves with it and the seam stays sealed. The handles on either side travel
-//! with the node, as in a drawing program, so the pieces keep their shape
-//! near the other end.
+//! it, and a node deleted. A node is found by its exact coordinates
+//! (`simplify::key`), the way rounding and straightening find theirs, so
+//! every outline passing through it (both sides of an edge two fills share,
+//! every boundary of a junction) changes with it and the seam stays sealed.
+//! The handles on either side travel with a moved node, as in a drawing
+//! program, so the pieces keep their shape near the other end.
 
 use crate::geometry::{Cubic, Point};
-use crate::simplify::{add, key, parse_all_paths, splice, sub, Edge, Key};
+use crate::simplify::{
+    add, backwards, fit_samples, key, largest_distance, leaving, normalized, parse_all_paths,
+    splice, sub, Edge, Key, Subpath, SAMPLES_PER_SEGMENT,
+};
 use std::collections::{HashMap, HashSet};
 
 /// One node moved from where the document has it to where it was dropped.
@@ -110,6 +113,207 @@ pub fn move_nodes(svg: &str, moves: &[NodeMove]) -> Result<(String, usize), Stri
         return Ok((svg.to_owned(), 0));
     }
     Ok((splice(svg, &ranges, &paths), hit.len()))
+}
+
+/// One node deleted by hand. The two pieces meeting there become one piece
+/// from the node before to the node after: with `keep_shape`, one cubic
+/// fitted to the curve the two drew, leaving and arriving along their outer
+/// tangents (Simplify's merge, `simplify::fit_samples`), so the outline stays
+/// where one cubic can follow it; without, the cubic that keeps the two
+/// pieces' outer handles, as if the node had never been there (two lines
+/// become one line).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NodeDeletion {
+    pub at: Point,
+    pub keep_shape: bool,
+}
+
+/// Why a node cannot be deleted.
+pub const ABSENT: &str = "This node is not in the drawing.";
+const JUNCTION: &str = "Three or more boundaries meet at this node, so it stays.";
+const OPEN_END: &str = "The end of an open outline stays.";
+const TOO_FEW: &str = "An outline keeps at least three nodes.";
+/// A closed outline keeps this many nodes at the least.
+const MIN_OUTLINE_NODES: usize = 3;
+
+/// Why the node at `at` cannot be deleted, or `None` when it can: it must be
+/// in the drawing, join exactly two pieces (a junction of three or more
+/// fills joins more), not end an open outline, and leave every closed
+/// outline through it at least three nodes.
+pub fn deletion_refusal(svg: &str, at: Point) -> Result<Option<&'static str>, String> {
+    let (_, paths) = parse_all_paths(svg)?;
+    Ok(refusal(&paths, key(at)))
+}
+
+fn refusal(paths: &[Vec<Subpath>], node: Key) -> Option<&'static str> {
+    let mut incident = HashSet::new();
+    let mut too_few = false;
+    let mut open_end = false;
+    for subpath in paths.iter().flatten() {
+        let mut touches = false;
+        for edge in &subpath.edges {
+            if key(edge.start()) == node || key(edge.end()) == node {
+                incident.insert(edge.key().0);
+                touches = true;
+            }
+        }
+        if !touches {
+            continue;
+        }
+        if subpath.cyclic() {
+            too_few |= subpath.edges.len() <= MIN_OUTLINE_NODES;
+        } else if let (Some(first), Some(last)) = (subpath.edges.first(), subpath.edges.last()) {
+            open_end |= key(first.start()) == node || key(last.end()) == node;
+        }
+    }
+    if incident.is_empty() {
+        Some(ABSENT)
+    } else if incident.len() > 2 {
+        Some(JUNCTION)
+    } else if open_end {
+        Some(OPEN_END)
+    } else if too_few {
+        Some(TOO_FEW)
+    } else {
+        None
+    }
+}
+
+/// Where `node` sits in `subpath`: the index of the piece leaving it (the
+/// piece arriving is the one before). An open outline's first node has no
+/// piece arriving.
+fn leaving_index(subpath: &Subpath, node: Key) -> Option<usize> {
+    let cyclic = subpath.cyclic();
+    (0..subpath.edges.len())
+        .filter(|&i| cyclic || i > 0)
+        .find(|&i| key(subpath.edges[i].start()) == node)
+}
+
+/// The piece without the node between `arriving` and `leaving`, keeping
+/// their outer handles.
+fn joined(arriving: &Edge, leaving: &Edge) -> Edge {
+    if arriving.line && leaving.line {
+        return Edge::line(arriving.start(), leaving.end(), false);
+    }
+    let [p0, p1, _, _] = arriving.cubic.points;
+    let [_, _, p2, p3] = leaving.cubic.points;
+    Edge {
+        cubic: Cubic {
+            points: [p0, p1, p2, p3],
+        },
+        line: false,
+        implicit: false,
+    }
+}
+
+/// One cubic through the curve `arriving` and `leaving` drew, along their
+/// outer tangents; two lines running on in one direction stay a line. The
+/// plain join has the same tangents, so it is a candidate too: the fit's
+/// handle search is local, and whichever stays closer to the curve wins.
+fn refitted(arriving: &Edge, leaving_edge: &Edge) -> Edge {
+    let (a, b) = (arriving.start(), leaving_edge.end());
+    if arriving.line && leaving_edge.line {
+        let (u, v) = (sub(arriving.end(), a), sub(b, leaving_edge.start()));
+        let cross = u.x * v.y - u.y * v.x;
+        let lengths = (u.x.hypot(u.y) * v.x.hypot(v.y)).max(1e-300);
+        if (cross / lengths).abs() < 1e-9 && u.x * v.x + u.y * v.y > 0. {
+            return Edge::line(a, b, false);
+        }
+    }
+    let sample = |edge: &Edge| {
+        (0..=SAMPLES_PER_SEGMENT)
+            .map(|k| edge.cubic.evaluate(k as f64 / SAMPLES_PER_SEGMENT as f64))
+            .collect::<Vec<Point>>()
+    };
+    let mut samples = sample(arriving);
+    samples.extend_from_slice(&sample(leaving_edge)[1..]);
+    let chord = normalized(sub(b, a));
+    let start = leaving(arriving).or(chord);
+    let end = backwards(leaving_edge).or(chord.map(|c| Point { x: -c.x, y: -c.y }));
+    let plain = joined(arriving, leaving_edge);
+    let Some((cubic, error)) = start
+        .zip(end)
+        .and_then(|(start, end)| fit_samples(&samples, start, end))
+    else {
+        return plain;
+    };
+    match largest_distance(&samples, &plain.cubic) {
+        Some(plain_error) if plain_error <= error => plain,
+        _ => Edge {
+            cubic,
+            line: false,
+            implicit: false,
+        },
+    }
+}
+
+/// Delete the listed nodes, one after another. A node that is not in the
+/// document, or that `deletion_refusal` refuses there, is skipped (a later
+/// trace may no longer have it, or have it as a junction), and a node listed
+/// twice takes its first listing. The new piece is worked out once, from the
+/// first outline through the node, and every outline through it gets that
+/// piece or its reverse, so both fills of a shared edge stay sealed. Returns
+/// the rewritten SVG and how many nodes went.
+pub fn delete_nodes(svg: &str, deletions: &[NodeDeletion]) -> Result<(String, usize), String> {
+    if deletions
+        .iter()
+        .any(|d| !(d.at.x.is_finite() && d.at.y.is_finite()))
+    {
+        return Err("A node to delete must have a finite position".into());
+    }
+    if deletions.is_empty() {
+        return Ok((svg.to_owned(), 0));
+    }
+    let (ranges, mut paths) = parse_all_paths(svg)?;
+    let mut listed = HashSet::new();
+    let mut deleted = 0;
+    for deletion in deletions {
+        let node = key(deletion.at);
+        if !listed.insert(node) || refusal(&paths, node).is_some() {
+            continue;
+        }
+        let Some((arriving, leaving_edge)) = paths.iter().flatten().find_map(|s| {
+            let n = s.edges.len();
+            leaving_index(s, node).map(|i| (s.edges[(i + n - 1) % n], s.edges[i]))
+        }) else {
+            continue;
+        };
+        let piece = if deletion.keep_shape {
+            refitted(&arriving, &leaving_edge)
+        } else {
+            joined(&arriving, &leaving_edge)
+        };
+        let pair = (arriving.key().0, leaving_edge.key().0);
+        for subpath in paths.iter_mut().flatten() {
+            let Some(i) = leaving_index(subpath, node) else {
+                continue;
+            };
+            let n = subpath.edges.len();
+            let before = (i + n - 1) % n;
+            let here = (subpath.edges[before].key().0, subpath.edges[i].key().0);
+            let replacement = if here == pair {
+                piece
+            } else if here == (pair.1, pair.0) {
+                piece.reversed()
+            } else {
+                continue;
+            };
+            if i == 0 {
+                // The outline's first node: it now starts where its last
+                // piece did.
+                subpath.edges[0] = replacement;
+                subpath.edges.pop();
+            } else {
+                subpath.edges[before] = replacement;
+                subpath.edges.remove(i);
+            }
+        }
+        deleted += 1;
+    }
+    if deleted == 0 {
+        return Ok((svg.to_owned(), 0));
+    }
+    Ok((splice(svg, &ranges, &paths), deleted))
 }
 
 /// Every piece of the document that starts or ends at `at`, each once (the
@@ -301,5 +505,218 @@ mod tests {
         // The corner at the new place is cut round, not drawn sharp.
         assert!(!ends.contains(&point(12., 0.)), "{outline:?}");
         assert!(outline.iter().any(|p| !p.line));
+    }
+
+    /// Two fills sharing an S-shaped boundary of two pieces, whose middle
+    /// node joins only those two.
+    const SHARED_S: &str = "<svg viewBox=\"0 0 20 20\">\
+        <path fill=\"#ff0000\" d=\" M 0.00 0.00 L 10.00 0.00 C 12.00 3.00 12.00 7.00 10.00 10.00 C 8.00 13.00 8.00 17.00 10.00 20.00 L 0.00 20.00 Z\" />\
+        <path fill=\"#0000ff\" d=\" M 10.00 0.00 L 20.00 0.00 L 20.00 20.00 L 10.00 20.00 C 8.00 17.00 8.00 13.00 10.00 10.00 C 12.00 7.00 12.00 3.00 10.00 0.00 Z\" />\
+        </svg>";
+
+    fn cubics(svg: &str) -> Vec<Vec<Edge>> {
+        let (_, paths) = parse_all_paths(svg).unwrap();
+        paths
+            .iter()
+            .map(|p| {
+                p.iter()
+                    .flat_map(|s| s.edges.clone())
+                    .filter(|e| !e.line)
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The largest distance from the S's two pieces to `edge`, sampled.
+    fn off_the_s(edge: &Edge) -> f64 {
+        let (_, paths) = parse_all_paths(SHARED_S).unwrap();
+        let curve: Vec<Point> = paths[0]
+            .iter()
+            .flat_map(|s| s.edges.iter().filter(|e| !e.line))
+            .flat_map(|e| (0..=40).map(move |k| e.cubic.evaluate(k as f64 / 40.)))
+            .collect();
+        let drawn: Vec<Point> = (0..=400)
+            .map(|k| edge.cubic.evaluate(k as f64 / 400.))
+            .collect();
+        curve
+            .iter()
+            .map(|p| {
+                drawn
+                    .iter()
+                    .map(|q| (p.x - q.x).hypot(p.y - q.y))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0., f64::max)
+    }
+
+    #[test]
+    fn a_deleted_node_keeps_the_outer_handles_in_both_fills() {
+        let at = point(10., 10.);
+        assert_eq!(deletion_refusal(SHARED_S, at).unwrap(), None);
+        let deletion = NodeDeletion {
+            at,
+            keep_shape: false,
+        };
+        let (svg, count) = delete_nodes(SHARED_S, &[deletion]).unwrap();
+        assert_eq!(count, 1);
+        assert!(!svg.contains("10.00 10.00"), "{svg}");
+        // One piece with the two outer handles, each fill walking it its way.
+        assert!(svg.contains("C 12.00 3.00 8.00 17.00 10.00 20.00"), "{svg}");
+        assert!(svg.contains("C 8.00 17.00 12.00 3.00 10.00 0.00"), "{svg}");
+        // Listed twice, the node goes once; listed again, it is gone.
+        let (again, count) = delete_nodes(SHARED_S, &[deletion, deletion]).unwrap();
+        assert_eq!((again.as_str(), count), (svg.as_str(), 1));
+        assert_eq!(delete_nodes(&svg, &[deletion]).unwrap(), (svg.clone(), 0));
+    }
+
+    #[test]
+    fn a_node_deleted_keeping_the_shape_stays_on_the_curve_and_sealed() {
+        let at = point(10., 10.);
+        let plain = delete_nodes(
+            SHARED_S,
+            &[NodeDeletion {
+                at,
+                keep_shape: false,
+            }],
+        )
+        .unwrap()
+        .0;
+        let (svg, count) = delete_nodes(
+            SHARED_S,
+            &[NodeDeletion {
+                at,
+                keep_shape: true,
+            }],
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        assert!(!svg.contains("10.00 10.00"), "{svg}");
+        let fills = cubics(&svg);
+        let (red, blue) = (&fills[0], &fills[1]);
+        assert_eq!((red.len(), blue.len()), (1, 1), "{svg}");
+        // Both fills carry the same cubic, written the same, one reversed.
+        let n = |p: Point| format!("{:.2} {:.2}", p.x, p.y);
+        let [a0, a1, a2, a3] = red[0].cubic.points;
+        let [b0, b1, b2, b3] = blue[0].cubic.points;
+        assert_eq!(
+            [n(a0), n(a1), n(a2), n(a3)],
+            [n(b3), n(b2), n(b1), n(b0)],
+            "{svg}"
+        );
+        // It follows the S far closer than the plain join does.
+        let kept = off_the_s(&red[0]);
+        let joined = off_the_s(&cubics(&plain)[0][0]);
+        assert!(kept < 0.5 && kept < joined / 2., "{kept} against {joined}");
+    }
+
+    #[test]
+    fn keeping_the_shape_is_never_further_off_than_the_plain_join() {
+        // A corner between a line and a curve, walked both ways.
+        let line = Edge::line(point(0., 0.), point(10., 0.), false);
+        let curve = Edge {
+            cubic: Cubic {
+                points: [
+                    point(10., 0.),
+                    point(13., 3.),
+                    point(13., 7.),
+                    point(10., 10.),
+                ],
+            },
+            line: false,
+            implicit: false,
+        };
+        for (a, b) in [(line, curve), (curve.reversed(), line.reversed())] {
+            let samples: Vec<Point> = [a, b]
+                .iter()
+                .enumerate()
+                .flat_map(|(i, e)| {
+                    (usize::from(i > 0)..=SAMPLES_PER_SEGMENT)
+                        .map(move |k| e.cubic.evaluate(k as f64 / SAMPLES_PER_SEGMENT as f64))
+                })
+                .collect();
+            let kept = largest_distance(&samples, &refitted(&a, &b).cubic).unwrap();
+            let plain = largest_distance(&samples, &joined(&a, &b).cubic).unwrap();
+            assert!(kept <= plain, "{kept} against {plain}");
+        }
+    }
+
+    #[test]
+    fn an_outlines_first_node_goes_and_two_lines_become_one() {
+        // The red square's first node: its closing line and first line join.
+        let (svg, count) = delete_nodes(
+            SVG,
+            &[NodeDeletion {
+                at: point(0., 0.),
+                keep_shape: false,
+            }],
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        assert!(
+            svg.contains(
+                "d=\" M 0.00 10.00 L 10.00 0.00 C 12.00 3.00 12.00 7.00 10.00 10.00 L 0.00 10.00 Z\""
+            ),
+            "{svg}"
+        );
+        // Two lines running on in one direction stay one line when refitted.
+        let straight = "<svg viewBox=\"0 0 20 20\">\
+            <path fill=\"#000000\" d=\" M 0.00 0.00 L 5.00 0.00 L 10.00 0.00 L 10.00 10.00 L 0.00 10.00 Z\" />\
+            </svg>";
+        let (svg, _) = delete_nodes(
+            straight,
+            &[NodeDeletion {
+                at: point(5., 0.),
+                keep_shape: true,
+            }],
+        )
+        .unwrap();
+        assert!(
+            svg.contains("d=\" M 0.00 0.00 L 10.00 0.00 L 10.00 10.00 L 0.00 10.00 Z\""),
+            "{svg}"
+        );
+    }
+
+    #[test]
+    fn junctions_open_ends_and_the_last_three_nodes_stay() {
+        // Where the two squares and their shared curve meet, three pieces.
+        let junction = point(10., 10.);
+        assert_eq!(deletion_refusal(SVG, junction).unwrap(), Some(JUNCTION));
+        assert_eq!(
+            delete_nodes(
+                SVG,
+                &[NodeDeletion {
+                    at: junction,
+                    keep_shape: true,
+                }],
+            )
+            .unwrap(),
+            (SVG.to_owned(), 0)
+        );
+        let triangle = "<svg viewBox=\"0 0 20 20\">\
+            <path fill=\"#000000\" d=\" M 0.00 0.00 L 10.00 0.00 L 10.00 10.00 Z\" />\
+            <path fill=\"#ffffff\" d=\" M 12.00 0.00 L 15.00 0.00 L 18.00 3.00\" />\
+            </svg>";
+        assert_eq!(
+            deletion_refusal(triangle, point(10., 0.)).unwrap(),
+            Some(TOO_FEW)
+        );
+        assert_eq!(
+            deletion_refusal(triangle, point(12., 0.)).unwrap(),
+            Some(OPEN_END)
+        );
+        // An open outline's middle node is an ordinary one.
+        assert_eq!(deletion_refusal(triangle, point(15., 0.)).unwrap(), None);
+        assert_eq!(
+            deletion_refusal(triangle, point(3., 3.)).unwrap(),
+            Some(ABSENT)
+        );
+        assert!(delete_nodes(
+            SVG,
+            &[NodeDeletion {
+                at: point(f64::NAN, 0.),
+                keep_shape: false,
+            }]
+        )
+        .is_err());
     }
 }

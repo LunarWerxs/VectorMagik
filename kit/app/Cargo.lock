@@ -2219,9 +2219,10 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "vector-magic-rebuild"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eframe",
+ "egui",
  "image",
  "miniz_oxide 0.8.9",
  "resvg",

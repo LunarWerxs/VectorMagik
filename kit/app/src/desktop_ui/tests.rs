@@ -1,5 +1,6 @@
 //! The desktop's own tests.
 use super::*;
+use std::time::Instant;
 fn run_frame(ctx: &egui::Context, app: &mut Desktop) {
     let _ = ctx.run(
         egui::RawInput {
@@ -746,6 +747,38 @@ fn zoomed_vector_gets_a_crisp_tile_from_the_render_thread() {
 }
 
 #[test]
+fn a_scaled_display_gets_a_tile_in_its_own_pixels() {
+    let ctx = egui::Context::default();
+    let mut app = converted(&ctx);
+    // The 250 px picture's preview has 4 pixels per picture pixel; at 6
+    // points per picture pixel a display at 100% wants a tile of the view.
+    let scale = 6.;
+    let (size, viewport) = (Vec2::splat(250. * scale), Vec2::new(400., 300.));
+    app.request_tile(scale, 1., size, viewport, 8192);
+    let one = app.tile_pending.take().expect("a tile at 100%");
+    // The same view on a display at 200%: twice the pixels each way, the
+    // same picture area.
+    app.request_tile(scale, 2., size, viewport, 8192);
+    let two = app.tile_pending.take().expect("a tile at 200%");
+    assert_eq!((one.ppp, two.ppp), (1., 2.));
+    assert_eq!(one.origin, two.origin);
+    for axis in 0..2 {
+        let (a, b) = (one.size[axis] as f32, two.size[axis] as f32);
+        assert!(
+            (b - 2. * a).abs() <= 2.,
+            "{:?} against {:?}",
+            one.size,
+            two.size
+        );
+    }
+    // At half the zoom the preview is enough at 100% and not at 200%.
+    app.request_tile(scale / 2., 1., size / 2., viewport, 8192);
+    assert!(app.tile_pending.is_none());
+    app.request_tile(scale / 2., 2., size / 2., viewport, 8192);
+    assert!(app.tile_pending.is_some());
+}
+
+#[test]
 fn every_icon_has_a_glyph() {
     let ctx = egui::Context::default();
     let _app = Desktop::blank(&ctx);
@@ -1402,12 +1435,14 @@ fn a_superseded_auto_result_leaves_the_slider_alone() {
     let raw = app.raw_document.clone().unwrap();
     let settings = DeriveSettings {
         simplify: Some(0.3),
+        simplify_by_hand: false,
         deleted: Vec::new(),
         regularize: None,
         primitives: false,
         straighten: None,
         straightened: Vec::new(),
         moved: Vec::new(),
+        deleted_nodes: Vec::new(),
         rounded: Vec::new(),
         sticker: None,
     };
@@ -1859,4 +1894,105 @@ fn cancel_holds_the_settings_until_they_change() {
     assert!(app.worker.is_some());
     finish(&ctx, &mut app);
     assert_eq!(app.converted_prep.as_ref().unwrap().colors, Some(4));
+}
+
+#[test]
+fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
+    let ctx = egui::Context::default();
+    let mut app = converted(&ctx);
+    run_frame(&ctx, &mut app);
+    let svg = |app: &Desktop| app.document.as_ref().unwrap().svg().to_owned();
+    let shows = |app: &Desktop, p: &Point| {
+        app.document
+            .as_ref()
+            .unwrap()
+            .nodes()
+            .iter()
+            .any(|n| same_point(n, p))
+    };
+    let start = svg(&app);
+    let nodes = app.document.as_ref().unwrap().nodes();
+    let refusal = |p: &Point| vector_rebuild::nodes::deletion_refusal(&start, *p).unwrap();
+    let node = *nodes
+        .iter()
+        .find(|n| refusal(n).is_none())
+        .expect("a node joining two pieces");
+    // From its menu: the node goes and the menu closes, one step of Undo.
+    app.node_menu = Some((node, egui::pos2(300., 300.)));
+    assert_eq!(app.deletion_refusal(&node), None);
+    app.delete_node(node, false);
+    assert!(app.node_menu.is_none());
+    settle(&ctx, &mut app);
+    assert!(!shows(&app, &node));
+    let plain = svg(&app);
+    assert_ne!(plain, start);
+    shortcut(&ctx, &mut app, Key::Z, Modifiers::COMMAND);
+    assert!(app.deleted_nodes.is_empty());
+    assert_eq!(svg(&app), start);
+    // Keeping the shape refits the piece in its place (or keeps the plain
+    // join, when that stays closer to the curve).
+    app.delete_node(node, true);
+    settle(&ctx, &mut app);
+    let kept = svg(&app);
+    assert!(!shows(&app, &node));
+    assert_ne!(kept, start);
+    shortcut(&ctx, &mut app, Key::Z, Modifiers::COMMAND);
+    assert_eq!(svg(&app), start);
+    shortcut(&ctx, &mut app, Key::Y, Modifiers::COMMAND);
+    assert_eq!(svg(&app), kept);
+    // Converted again, the same trace loses the same node.
+    app.start();
+    finish(&ctx, &mut app);
+    settle(&ctx, &mut app);
+    assert_eq!(svg(&app), kept);
+    // A junction stays, and says why.
+    if let Some(junction) = nodes.iter().find(|n| refusal(n).is_some()) {
+        let before = app.deleted_nodes.clone();
+        app.delete_node(*junction, false);
+        assert_eq!(app.deleted_nodes, before);
+        assert_eq!(Some(app.status.as_str()), refusal(junction));
+    }
+    // A rounded corner deleted takes its rounding with it. Picked in the
+    // drawing as it stands: the first deletion may have left the outline it
+    // was on with three nodes, which then all stay.
+    let now = svg(&app);
+    let other = *app
+        .document
+        .as_ref()
+        .unwrap()
+        .nodes()
+        .iter()
+        .find(|n| {
+            vector_rebuild::nodes::deletion_refusal(&now, **n)
+                .unwrap()
+                .is_none()
+        })
+        .expect("a second node joining two pieces");
+    app.round_node(other, Reach::Tight);
+    settle(&ctx, &mut app);
+    // The two ends of its arc are shown, but made by the rounding.
+    let arc_end = {
+        let shown = app.document.as_ref().unwrap();
+        let before = shown.unrounded.clone().unwrap();
+        shown
+            .nodes()
+            .into_iter()
+            .find(|n| {
+                vector_rebuild::nodes::deletion_refusal(&before, *n).unwrap()
+                    == Some(vector_rebuild::nodes::ABSENT)
+            })
+            .expect("a node the rounding made")
+    };
+    assert!(app
+        .deletion_refusal(&arc_end)
+        .is_some_and(|why| why.contains("rounded corner")));
+    app.delete_node(other, false);
+    settle(&ctx, &mut app);
+    assert!(app.rounding_of(&other).is_none(), "{}", app.status);
+    assert_eq!(app.deleted_nodes.len(), 2);
+    // Brought back, every node is where the trace put it.
+    app.restore_deleted_nodes();
+    settle(&ctx, &mut app);
+    assert!(app.deleted_nodes.is_empty());
+    assert_eq!(svg(&app), start);
 }

@@ -27,6 +27,7 @@ impl Desktop {
             rounded: self.rounded.clone(),
             straightened: self.straightened.clone(),
             moved: self.moved.clone(),
+            deleted_nodes: self.deleted_nodes.clone(),
             deleted: self.deleted.clone(),
             prep: self.prep.clone(),
             conversion: self.conversion_settings(),
@@ -48,6 +49,7 @@ impl Desktop {
         seen.rounded == self.rounded
             && seen.straightened == self.straightened
             && seen.moved == self.moved
+            && seen.deleted_nodes == self.deleted_nodes
             && seen.deleted == self.deleted
             && seen.prep == self.prep
             && seen.conversion == self.conversion_settings()
@@ -159,6 +161,7 @@ impl Desktop {
             rounded,
             straightened,
             moved,
+            deleted_nodes,
             deleted,
             prep,
             conversion,
@@ -175,6 +178,7 @@ impl Desktop {
         self.rounded = rounded;
         self.straightened = straightened;
         self.moved = moved;
+        self.deleted_nodes = deleted_nodes;
         self.deleted = deleted;
         self.prep = prep;
         self.automatic = conversion.automatic;
@@ -270,9 +274,15 @@ impl Desktop {
             self.reapply();
         }
     }
-    /// Put every moved node back.
+    /// Put every moved node back. A node moved and then deleted stays
+    /// moved: its deletion is keyed where the move took it, and deleting it
+    /// kept the shape it had there.
     pub(super) fn put_all_back(&mut self) {
-        for moved in std::mem::take(&mut self.moved) {
+        let (deleted, back): (Vec<NodeMove>, Vec<NodeMove>) = std::mem::take(&mut self.moved)
+            .into_iter()
+            .partition(|m| self.is_deleted(&m.to));
+        self.moved = deleted;
+        for moved in back {
             for rounded in &mut self.rounded {
                 if same_point(&rounded.at, &moved.to) {
                     rounded.at = moved.from;
@@ -280,6 +290,88 @@ impl Desktop {
             }
         }
         self.reapply();
+    }
+    /// The moved nodes still in the drawing, which Put back can return.
+    pub(super) fn moves_shown(&self) -> usize {
+        self.moved
+            .iter()
+            .filter(|m| !self.is_deleted(&m.to))
+            .count()
+    }
+    fn is_deleted(&self, node: &Point) -> bool {
+        self.deleted_nodes.iter().any(|d| same_point(&d.at, node))
+    }
+    /// Why the node shown at `node` cannot be deleted, or `None`: worked out
+    /// on the document the deletions apply to (before the rounding, which
+    /// cuts a rounded corner's node out), once per node and document.
+    pub(super) fn deletion_refusal(&mut self, node: &Point) -> Option<&'static str> {
+        if let Some((version, at, refusal)) = self.deletable {
+            if version == self.document_version && same_point(&at, node) {
+                return refusal;
+            }
+        }
+        let refusal = match &self.document {
+            Some(document) => {
+                let svg = document
+                    .unrounded
+                    .as_deref()
+                    .map_or(document.svg(), String::as_str);
+                match vector_rebuild::nodes::deletion_refusal(svg, *node) {
+                    // Shown but not there before the rounding: one of the
+                    // two ends of a rounded corner's arc.
+                    Ok(Some(vector_rebuild::nodes::ABSENT))
+                        if document.unrounded.is_some()
+                            && document.nodes().iter().any(|n| same_point(n, node)) =>
+                    {
+                        Some(
+                            "This node ends a rounded corner's arc: restore the corner to \
+                             delete nodes there.",
+                        )
+                    }
+                    Ok(refusal) => refusal,
+                    Err(_) => Some("The drawing could not be read."),
+                }
+            }
+            None => Some("Wait for the conversion to finish."),
+        };
+        self.deletable = Some((self.document_version, *node, refusal));
+        refusal
+    }
+    /// Delete the node shown at `node` from the drawing: its two pieces
+    /// become one, keeping their outer handles, or with `keep_shape` one
+    /// cubic fitted to the curve they drew. A rounded corner's rounding goes
+    /// with it. Refused, with the reason in the status line, at a junction,
+    /// at an open outline's end and on an outline of three nodes.
+    pub(super) fn delete_node(&mut self, node: Point, keep_shape: bool) {
+        if let Some(reason) = self.deletion_refusal(&node) {
+            self.set_status(StatusKind::Info, reason);
+            return;
+        }
+        if self.is_deleted(&node) {
+            return;
+        }
+        self.rounded.retain(|r| !same_point(&r.at, &node));
+        self.deleted_nodes.push(NodeDeletion {
+            at: node,
+            keep_shape,
+        });
+        self.node_menu = None;
+        self.reapply();
+        self.set_status(
+            StatusKind::Info,
+            if keep_shape {
+                "Node deleted, its curve refitted. Ctrl+Z brings it back."
+            } else {
+                "Node deleted. Ctrl+Z brings it back."
+            },
+        );
+    }
+    /// Bring every deleted node back.
+    pub(super) fn restore_deleted_nodes(&mut self) {
+        if !self.deleted_nodes.is_empty() {
+            self.deleted_nodes.clear();
+            self.reapply();
+        }
     }
     /// Begin dragging the node marker shown at `at`, with the pieces it
     /// pulls along for the preview drawn while it moves.
@@ -351,7 +443,7 @@ impl Desktop {
         let since = match &self.inputs_changed {
             Some((seen, at)) if *seen == inputs => *at,
             _ => {
-                let now = Instant::now();
+                let now = Stopwatch::start();
                 self.inputs_changed = Some((inputs, now));
                 now
             }

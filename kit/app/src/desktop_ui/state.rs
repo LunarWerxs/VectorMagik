@@ -3,6 +3,7 @@
 use super::*;
 
 impl Desktop {
+    #[cfg(feature = "desktop")]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::blank(&cc.egui_ctx);
         if let Some(path) = prefs::prefs_path() {
@@ -17,7 +18,30 @@ impl Desktop {
         }
         app
     }
+    /// The app in a browser tab (`kit/web`), with the preferences the page
+    /// kept from the last visit.
+    pub fn in_browser(ctx: &egui::Context, prefs: &str) -> Self {
+        let mut app = Self::blank(ctx);
+        (app.hold_compare, app.auto_convert) =
+            prefs::parse_prefs(prefs, (app.hold_compare, app.auto_convert));
+        app.prefs_saved = (app.hold_compare, app.auto_convert);
+        app
+    }
+    /// The drawing as it is saved, once nothing is left running for it; for
+    /// the browser build's check that the app there draws what the desktop
+    /// does.
+    pub fn settled_svg(&self) -> Option<String> {
+        if !self.idle() || self.derive_pending.is_some() || platform::has_pending() {
+            return None;
+        }
+        self.export_svg()?.ok()
+    }
+    /// The status line as the footer shows it.
+    pub fn status_line(&self) -> String {
+        self.status.clone()
+    }
     pub(crate) fn blank(ctx: &egui::Context) -> Self {
+        #[cfg(feature = "desktop")]
         crate::dragout::tidy();
         let title_family = install_fonts(ctx);
         apply_theme(ctx, title_family.clone());
@@ -65,8 +89,10 @@ impl Desktop {
             palette: Vec::new(),
             rounded: Vec::new(),
             moved: Vec::new(),
+            deleted_nodes: Vec::new(),
             node_drag: None,
             node_menu: None,
+            deletable: None,
             undo: Vec::new(),
             redo: Vec::new(),
             edits_seen: None,
@@ -105,6 +131,7 @@ impl Desktop {
             preview: None,
             tile: None,
             tile_pending: None,
+            tile_wanted: None,
             tiler: Some(spawn_tiler(ctx.clone())),
             logo,
             worker: None,
@@ -115,7 +142,7 @@ impl Desktop {
             staged: None,
             status: "Open an image, or drop one onto the source card.".into(),
             status_kind: StatusKind::Info,
-            started: Instant::now(),
+            started: Stopwatch::start(),
             elapsed: None,
             zoom: 1.,
             fit: 1.,
@@ -139,6 +166,7 @@ impl Desktop {
             frames: 0,
         }
     }
+    #[cfg(feature = "desktop")]
     #[allow(
         clippy::too_many_arguments,
         reason = "one argument per headless snapshot input; the CLI passes them straight through"
@@ -201,7 +229,7 @@ impl Desktop {
                 }
             }
             if convert {
-                app.started = Instant::now();
+                app.started = Stopwatch::start();
                 let result = Self::process(
                     app.raster.clone().unwrap(),
                     &app.prep,
@@ -219,6 +247,7 @@ impl Desktop {
     }
     /// Cut the background shapes out and re-derive on this thread, for a
     /// snapshot; the window uses the derive thread instead.
+    #[cfg(feature = "desktop")]
     pub(crate) fn cut_background_now(&mut self, ctx: &egui::Context) -> Result<usize, String> {
         let removals = self.background_removals();
         if removals.is_empty() {
@@ -229,6 +258,7 @@ impl Desktop {
         self.rederive_now(ctx)?;
         Ok(count)
     }
+    #[cfg(feature = "desktop")]
     pub(super) fn rederive_now(&mut self, ctx: &egui::Context) -> Result<(), String> {
         let Some(raw) = self.raw_document.clone() else {
             return Err("Convert an image first".into());
@@ -244,17 +274,20 @@ impl Desktop {
         self.status_kind = kind;
     }
     /// Side by side, or one picture showing the vector (`true`) or the bitmap.
+    #[cfg(feature = "desktop")]
     pub(crate) fn set_view(&mut self, view: View, vector: bool) {
         self.view = view;
         self.overlay_vector = vector;
     }
     /// Convert again with the settings in force and leave it running, for a
     /// snapshot of the view while a conversion replaces the shown result.
+    #[cfg(feature = "desktop")]
     pub(crate) fn convert_again(&mut self) {
         self.start();
     }
     /// Open one of the popups as a user would, for a snapshot. The node menu
     /// takes the first node of the shown document and opens at `at`.
+    #[cfg(feature = "desktop")]
     pub(crate) fn open_overlay(&mut self, overlay: Overlay, at: egui::Pos2) {
         match overlay {
             Overlay::Save => self.save_open = self.document.is_some(),
@@ -293,6 +326,7 @@ impl Desktop {
     /// Round the node nearest `at` with `reach` and re-derive the shown
     /// document on this thread, for a snapshot; the window uses the derive
     /// thread instead.
+    #[cfg(feature = "desktop")]
     pub(crate) fn round_nearest_now(
         &mut self,
         ctx: &egui::Context,
@@ -313,6 +347,41 @@ impl Desktop {
             .copied()
             .ok_or("The document has no nodes")?;
         self.rounded.push(Rounded { at: nearest, reach });
+        self.rederive_now(ctx)
+    }
+    /// Delete the shown node nearest `at` (keeping the shape when asked) and
+    /// re-derive the shown document on this thread, for a snapshot.
+    #[cfg(feature = "desktop")]
+    pub(crate) fn delete_nearest_now(
+        &mut self,
+        ctx: &egui::Context,
+        at: Point,
+        keep_shape: bool,
+    ) -> Result<(), String> {
+        let nodes = self
+            .document
+            .as_ref()
+            .ok_or("Convert an image before deleting a node")?
+            .nodes();
+        let nearest = nodes
+            .iter()
+            .min_by(|a, b| {
+                let da = (a.x - at.x).powi(2) + (a.y - at.y).powi(2);
+                let db = (b.x - at.x).powi(2) + (b.y - at.y).powi(2);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied()
+            .ok_or("The document has no nodes")?;
+        if let Some(reason) = self.deletion_refusal(&nearest) {
+            return Err(format!(
+                "The node at {:.2}, {:.2} cannot be deleted: {reason}",
+                nearest.x, nearest.y
+            ));
+        }
+        self.deleted_nodes.push(NodeDeletion {
+            at: nearest,
+            keep_shape,
+        });
         self.rederive_now(ctx)
     }
     /// The shown document's nodes, parsed once per document version (on the
@@ -472,12 +541,19 @@ impl Desktop {
     pub(super) fn derive_settings(&self) -> DeriveSettings {
         DeriveSettings {
             simplify: self.simplify_settings(),
+            // By hand: the slider no longer shows what the app chose itself,
+            // Auto's pick or the tolerance it starts at.
+            simplify_by_hand: self.simplify_tolerance
+                != self
+                    .simplify_pick
+                    .map_or(DEFAULT_SIMPLIFY_TOLERANCE, |pick| pick as f32),
             deleted: self.deleted.clone(),
             regularize: self.regularize_settings(),
             primitives: self.primitives,
             straighten: self.straighten_settings(),
             straightened: self.straightened.clone(),
             moved: self.moved.clone(),
+            deleted_nodes: self.deleted_nodes.clone(),
             rounded: self.rounded.iter().map(|r| r.rounding()).collect(),
             sticker: self.sticker_settings(),
         }
@@ -490,6 +566,7 @@ impl Desktop {
     ) -> Result<VectorDocument, String> {
         let raw = raw.without_islands(&settings.deleted)?;
         let shown = match settings.simplify {
+            Some(tolerance) if settings.simplify_by_hand => raw.simplified_by_hand(tolerance)?,
             Some(tolerance) => raw.simplified(tolerance)?,
             None => raw,
         };
@@ -497,8 +574,8 @@ impl Desktop {
     }
     /// The steps after simplification: true lines and circles,
     /// straightening and the shapes from the pixels (`post_passes`), then
-    /// the nodes moved by hand, then the rounded corners (keyed where the
-    /// moves left their nodes).
+    /// the nodes moved by hand, then the nodes deleted by hand, then the
+    /// rounded corners (both keyed where the moves left their nodes).
     pub(super) fn finish(
         mut shown: VectorDocument,
         settings: &DeriveSettings,
@@ -510,6 +587,7 @@ impl Desktop {
             &settings.straightened,
         )?;
         shown = shown.moved(&settings.moved)?;
+        shown = shown.without_nodes(&settings.deleted_nodes)?;
         let rounded = &settings.rounded;
         if !rounded.is_empty() {
             shown = shown.smoothed(rounded)?;
@@ -846,6 +924,7 @@ impl Desktop {
     pub(super) fn clear_edits(&mut self) {
         self.rounded.clear();
         self.moved.clear();
+        self.deleted_nodes.clear();
         self.straightened.clear();
         self.deleted.clear();
         self.prep.recolors.clear();
@@ -879,8 +958,18 @@ impl Desktop {
     /// cleared them all first).
     pub(super) fn load(&mut self, ctx: &egui::Context) {
         let loaded =
-            crate::load_raster_up_to(std::path::Path::new(&self.path), crate::DESKTOP_MAX_PIXELS)
-                .and_then(crate::fit_for_engine);
+            crate::load_raster_up_to(std::path::Path::new(&self.path), crate::DESKTOP_MAX_PIXELS);
+        self.take_loaded(ctx, loaded);
+    }
+    /// Open the picture `name` from its file's bytes: a file dropped on or
+    /// picked in the browser tab, which has no paths.
+    pub(super) fn load_bytes(&mut self, ctx: &egui::Context, name: String, bytes: &[u8]) {
+        self.path = name;
+        let loaded = crate::decode_raster_up_to(bytes, crate::BROWSER_MAX_PIXELS);
+        self.take_loaded(ctx, loaded);
+    }
+    fn take_loaded(&mut self, ctx: &egui::Context, loaded: Result<Raster, String>) {
+        let loaded = loaded.and_then(crate::fit_for_engine);
         if let Err(error) = &loaded {
             if self.raster.is_some() {
                 self.path.clone_from(&self.loaded_path);
@@ -1040,7 +1129,7 @@ impl Desktop {
         self.held_inputs = None;
         let (sender, receiver) = mpsc::channel();
         self.worker = Some(receiver);
-        self.started = Instant::now();
+        self.started = Stopwatch::start();
         // Kept so that Cancel can put it back, and drawn until the result
         // arrives.
         let shown_nodes = (self.nodes && self.document.is_some()).then(|| self.current_nodes());
@@ -1068,7 +1157,7 @@ impl Desktop {
         self.set_status(StatusKind::Busy, "Creating vector curves\u{2026}");
         let stop = Arc::new(AtomicBool::new(false));
         self.stop = stop.clone();
-        std::thread::spawn(move || {
+        platform::spawn(move || {
             let result = std::panic::catch_unwind(move || -> JobResult {
                 let dropped = drop.map(|drop| {
                     let recolors = colour_drop(&drop.islands, &drop.working, &drop.hex);
@@ -1255,7 +1344,7 @@ impl Desktop {
         }
         self.save_open = false;
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        platform::spawn(move || {
             let _ = sender.send(job());
         });
         self.errand = Some(Errand {
@@ -1265,6 +1354,11 @@ impl Desktop {
         });
     }
     pub(super) fn open_dialog(&mut self) {
+        if platform::IN_BROWSER {
+            platform::ask(platform::Command::OpenPicker);
+            self.set_status(StatusKind::Info, "Choose an image in the file chooser.");
+            return;
+        }
         self.send_errand(ErrandKind::Open, || {
             Fetched::Picked(file_dialog(false, "", Format::Svg))
         });
@@ -1273,6 +1367,10 @@ impl Desktop {
     /// The system dialog, filtered to the chosen format; the format picked in
     /// the dialog wins if the user changes it there.
     pub(super) fn save_dialog(&mut self) {
+        if platform::IN_BROWSER {
+            self.download();
+            return;
+        }
         let (stem, format) = (self.export_stem(), self.save_format);
         self.send_errand(ErrandKind::Save, move || {
             Fetched::Picked(file_dialog(true, &stem, format))
@@ -1280,6 +1378,14 @@ impl Desktop {
         self.set_status(StatusKind::Info, "Choose where to save in the Save dialog.");
     }
     pub(super) fn save_preview_png(&mut self) {
+        if platform::IN_BROWSER {
+            self.snapshot_path = Some(PathBuf::from(format!(
+                "{}-app-preview.png",
+                self.export_stem()
+            )));
+            platform::ask(platform::Command::Screenshot);
+            return;
+        }
         self.send_errand(ErrandKind::Preview, || Fetched::Picked(file_dialog_png()));
         self.set_status(
             StatusKind::Info,
@@ -1309,7 +1415,7 @@ impl Desktop {
             Fetched::Written(crate::export::write_vector(&source, &target, &svg))
         });
         // Nothing converts while an errand is out, so the clock is free.
-        self.started = Instant::now();
+        self.started = Stopwatch::start();
         self.set_status(
             StatusKind::Busy,
             format!("Saving {}\u{2026}", path.display()),
@@ -1443,6 +1549,20 @@ impl Desktop {
     /// off the UI thread before the drag (which must start while the button
     /// is still held); a write already running finishes before the next.
     pub(super) fn stage_export(&mut self) {
+        #[cfg(not(feature = "desktop"))]
+        {
+            self.staged = self.stage_key().map(|key| Staged {
+                key,
+                path: PathBuf::new(),
+                writing: None,
+                error: None,
+            });
+        }
+        #[cfg(feature = "desktop")]
+        self.stage_drag_file();
+    }
+    #[cfg(feature = "desktop")]
+    fn stage_drag_file(&mut self) {
         if let Some(staged) = &mut self.staged {
             if let Some(receiver) = &staged.writing {
                 match receiver.try_recv() {
@@ -1480,7 +1600,7 @@ impl Desktop {
             Ok((path, svg)) => {
                 let (sender, receiver) = mpsc::channel();
                 let (source, target) = (PathBuf::from(&self.loaded_path), path.clone());
-                std::thread::spawn(move || {
+                platform::spawn(move || {
                     let _ = sender.send(crate::export::write_vector(&source, &target, &svg));
                 });
                 Staged {
@@ -1513,6 +1633,62 @@ impl Desktop {
     /// Hand the staged file to the system drag: the user drops it on the
     /// desktop, a folder or a program, which copies it from the staging folder.
     pub(super) fn drag_out(&mut self) {
+        #[cfg(not(feature = "desktop"))]
+        self.download();
+        #[cfg(feature = "desktop")]
+        self.drag_file();
+    }
+    /// In a browser tab: hand the page the saved file to download.
+    pub(super) fn download(&mut self) {
+        let name = self.export_name();
+        let saved = match self.export_svg() {
+            Some(svg) => {
+                svg.and_then(|svg| crate::export::vector_bytes(self.save_format.kind(), &svg))
+            }
+            None => Err("Nothing to save: convert the image first.".into()),
+        };
+        match saved {
+            Ok(data) => {
+                self.save_open = false;
+                let size = match self.output_size() {
+                    Some((w, h)) => format!(" at {w} \u{00D7} {h} px"),
+                    None => String::new(),
+                };
+                self.set_status(StatusKind::Done, format!("Downloaded {name}{size}."));
+                platform::ask(platform::Command::Download {
+                    name,
+                    mime: self.save_format.mime(),
+                    data,
+                });
+            }
+            Err(error) => self.set_status(StatusKind::Error, error),
+        }
+    }
+    /// In a browser tab: hand the page the app preview to download.
+    pub(super) fn download_png(&mut self, path: &Path, rgba: &[u8], width: usize, height: usize) {
+        let mut data = Vec::new();
+        let encoded = image::codecs::png::PngEncoder::new(&mut data);
+        match image::ImageEncoder::write_image(
+            encoded,
+            rgba,
+            width as u32,
+            height as u32,
+            image::ExtendedColorType::Rgba8,
+        ) {
+            Ok(()) => {
+                let name = path.to_string_lossy().into_owned();
+                self.set_status(StatusKind::Done, format!("Downloaded app preview {name}"));
+                platform::ask(platform::Command::Download {
+                    name,
+                    mime: "image/png",
+                    data,
+                });
+            }
+            Err(e) => self.set_status(StatusKind::Error, e.to_string()),
+        }
+    }
+    #[cfg(feature = "desktop")]
+    fn drag_file(&mut self) {
         let name = self.export_name();
         let staged = match self.stage_state() {
             StageState::Ready(path) => path,

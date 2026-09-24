@@ -1,7 +1,7 @@
 use std::path::Path;
 use vector_rebuild::raster::{Raster, Rgba};
 pub mod auto;
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub mod desktop_ui;
 pub mod engine;
 pub mod export;
@@ -45,13 +45,6 @@ pub fn parse_sticker(spec: &str) -> Result<vector_rebuild::sticker::Sticker, Str
     };
     sticker.validate()?;
     Ok(sticker)
-}
-
-pub fn write_svg(source: &Path, output: &Path, svg: &str) -> Result<(), String> {
-    if same_file(source, output) {
-        return Err("Input and output must be different files".into());
-    }
-    write_replacing(output, svg.as_bytes())
 }
 
 /// Saves `bytes` as `output` without ever truncating it in place: they go to
@@ -158,14 +151,39 @@ pub fn load_raster(path: &Path) -> Result<Raster, String> {
 /// 16-bit picture to 800 MB first).
 pub const DESKTOP_MAX_PIXELS: u64 = 100_000_000;
 
+/// The largest picture the browser build opens: a tab's memory is smaller.
+pub const BROWSER_MAX_PIXELS: u64 = 50_000_000;
+
 /// `load_raster` with a pixel limit of `max_pixels`.
 pub fn load_raster_up_to(path: &Path, max_pixels: u64) -> Result<Raster, String> {
-    let reader = || {
-        image::ImageReader::open(path)
-            .map_err(|e| e.to_string())?
-            .with_guessed_format()
-            .map_err(|e| e.to_string())
-    };
+    decode_up_to(
+        || {
+            image::ImageReader::open(path)
+                .map_err(|e| e.to_string())?
+                .with_guessed_format()
+                .map_err(|e| e.to_string())
+        },
+        max_pixels,
+    )
+}
+
+/// A picture from its file's `bytes` (a file dropped in a browser tab), with
+/// a pixel limit of `max_pixels`.
+pub fn decode_raster_up_to(bytes: &[u8], max_pixels: u64) -> Result<Raster, String> {
+    decode_up_to(
+        || {
+            image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .map_err(|e| e.to_string())
+        },
+        max_pixels,
+    )
+}
+
+fn decode_up_to<R: std::io::BufRead + std::io::Seek>(
+    reader: impl Fn() -> Result<image::ImageReader<R>, String>,
+    max_pixels: u64,
+) -> Result<Raster, String> {
     let (w, h) = reader()?.into_dimensions().map_err(|e| e.to_string())?;
     if w == 0 || h == 0 || u64::from(w) * u64::from(h) > max_pixels {
         return Err(format!(
@@ -314,20 +332,20 @@ pub fn preview_pixels(svg: &str) -> Result<(usize, usize, Vec<u8>), String> {
     Ok((width as usize, height as usize, pixmap.take()))
 }
 
-#[cfg(feature = "desktop")]
-pub fn preview(svg: &str) -> Result<eframe::egui::ColorImage, String> {
+#[cfg(feature = "ui")]
+pub fn preview(svg: &str) -> Result<egui::ColorImage, String> {
     let (width, height, pixels) = preview_pixels(svg)?;
-    Ok(eframe::egui::ColorImage::from_rgba_premultiplied(
+    Ok(egui::ColorImage::from_rgba_premultiplied(
         [width, height],
         &pixels,
     ))
 }
 
 /// A parsed vector document, kept between crisp renders of the same document.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub type PreviewTree = resvg::usvg::Tree;
 
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub fn preview_tree(svg: &str) -> Result<PreviewTree, String> {
     resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).map_err(|e| e.to_string())
 }
@@ -337,14 +355,14 @@ pub fn preview_tree(svg: &str) -> Result<PreviewTree, String> {
 /// image: crisp at any zoom. `document_width` is the viewBox width; the
 /// engine declares the SVG size in points, so the parsed tree is 4/3 larger
 /// than its viewBox and the transform compensates.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "ui")]
 pub fn render_region(
     tree: &PreviewTree,
     document_width: f32,
     scale: f32,
     origin: [f32; 2],
     size: [u32; 2],
-) -> Result<eframe::egui::ColorImage, String> {
+) -> Result<egui::ColorImage, String> {
     if !(scale.is_finite() && scale > 0.)
         || !(document_width.is_finite() && document_width > 0.)
         || size[0] == 0
@@ -359,7 +377,7 @@ pub fn render_region(
     let transform = resvg::tiny_skia::Transform::from_scale(tree_scale, tree_scale)
         .post_translate(-origin[0] * scale, -origin[1] * scale);
     resvg::render(tree, transform, &mut pixmap.as_mut());
-    Ok(eframe::egui::ColorImage::from_rgba_premultiplied(
+    Ok(egui::ColorImage::from_rgba_premultiplied(
         [size[0] as usize, size[1] as usize],
         pixmap.data(),
     ))

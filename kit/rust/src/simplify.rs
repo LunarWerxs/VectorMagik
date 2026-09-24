@@ -19,10 +19,17 @@ pub struct SimplifyOptions {
     /// Largest allowed distance, in source pixels, between the simplified
     /// curve and the curve it replaces.
     pub tolerance: f64,
+    /// Also smooth the kinks the merges keep (`smooth_kinks`): for a
+    /// tolerance chosen by hand, never for Auto's, which the quality rounds
+    /// of September 24, 2026 hold to the faithful drawing.
+    pub smooth_kinks: bool,
 }
 impl Default for SimplifyOptions {
     fn default() -> Self {
-        Self { tolerance: 0.5 }
+        Self {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        }
     }
 }
 
@@ -38,7 +45,7 @@ pub struct SimplifyStats {
 }
 
 /// Points sampled per original segment when measuring a replacement.
-const SAMPLES_PER_SEGMENT: usize = 12;
+pub(crate) const SAMPLES_PER_SEGMENT: usize = 12;
 /// A closed outline keeps at least this many pieces.
 const MIN_CLOSED_SEGMENTS: usize = 3;
 const FIT_ITERATIONS: usize = 6;
@@ -419,6 +426,13 @@ fn measure(samples: &[Point], u: &mut [f64], cubic: &Cubic, newton_steps: usize)
         .fold(0., f64::max)
 }
 
+/// The largest distance from `samples` to `cubic`, measured as `fit_samples`
+/// measures its trials, so the two can be compared.
+pub(crate) fn largest_distance(samples: &[Point], cubic: &Cubic) -> Option<f64> {
+    let mut u = chord_parameters(samples)?;
+    Some(measure(samples, &mut u, cubic, 4))
+}
+
 fn chord_parameters(samples: &[Point]) -> Option<Vec<f64>> {
     let n = samples.len();
     let mut u = vec![0.; n];
@@ -441,7 +455,7 @@ fn chord_parameters(samples: &[Point]) -> Option<Vec<f64>> {
 /// which finds the short handle least squares misses when its chord-length
 /// parameters couple the two coordinates. Returns the best cubic and its
 /// largest sample distance.
-fn fit_samples(samples: &[Point], t1: Point, t2: Point) -> Option<(Cubic, f64)> {
+pub(crate) fn fit_samples(samples: &[Point], t1: Point, t2: Point) -> Option<(Cubic, f64)> {
     let n = samples.len();
     if n < 3 {
         return None;
@@ -720,7 +734,8 @@ fn try_merge(a: &Piece, b: &Piece) -> (f64, Cubic) {
 
 /// Greedy merging within one run: always take the cheapest acceptable pair
 /// next, and never merge across the run's ends.
-fn simplify_run(run: &[Edge], cyclic: bool, tolerance: f64) -> Vec<Edge> {
+fn simplify_run(run: &[Edge], cyclic: bool, options: SimplifyOptions) -> Vec<Edge> {
+    let tolerance = options.tolerance;
     let mut pieces: Vec<Piece> = run.iter().map(|e| Piece::new(*e)).collect();
     let mut candidates: Vec<Option<(f64, Cubic)>> = vec![None; pieces.len()];
     let minimum = if cyclic { MIN_CLOSED_SEGMENTS } else { 1 };
@@ -763,7 +778,95 @@ fn simplify_run(run: &[Edge], cyclic: bool, tolerance: f64) -> Vec<Edge> {
         candidates[merged] = None;
         candidates[(merged + n - 1) % n] = None;
     }
+    if options.smooth_kinks {
+        smooth_kinks(&mut pieces, cyclic, tolerance);
+    }
     pieces.into_iter().map(|p| p.edge).collect()
+}
+
+/// A turn smaller than this at a node is already smooth.
+const KINK_MIN_TURN: f64 = 0.5;
+
+/// Whether `new` turns back more often than `old` did.
+fn turns_back_more(old: &Cubic, new: &Cubic) -> bool {
+    let count = |cubic: &Cubic| {
+        let mut turns = TurnBacks::default();
+        turns.follow(&tangents(cubic));
+        turns.count
+    };
+    count(new) > count(old)
+}
+
+/// A turn below this at a node is a kink that `smooth_kinks` may smooth; a
+/// sharper one is a corner the drawing keeps. Measured on September 24, 2026
+/// at the Simplify slider's far end (3 px) against smoothing everything the
+/// merge rule calls no corner (`CORNER_TURN`, 45) and against the best of five
+/// shared tangents instead of the halfway one: 20 with the halfway tangent
+/// moved the drawing least (geometry +0.0086, pixels +0.0105 against the
+/// merges alone) for nearly the largest gain (total -0.1042 against -0.1125),
+/// and a turn of 20 to 45 degrees is a letter's serif or a leaf's tip more
+/// often than a tracing error (testing/quality-round/kink-v20-3px.md).
+const KINK_TURN: f64 = 20.;
+
+/// Smooth the kinks the merges kept: a node where two pieces meet at a turn
+/// below `KINK_TURN` has both pieces fitted again to the curve they replace,
+/// leaving the node along one shared tangent, the halfway one (a straight
+/// piece keeps its direction and the curve beside it turns to meet it). The node is smoothed when both stay within
+/// `tolerance` and neither adds a turn-back. Merging can only remove a node,
+/// so a node it had to keep kept its kink however far the slider went (the
+/// owner's GitHub mark, September 23, 2026: a 17 degree kink on the cat's
+/// head beside its ear, at every tolerance up to 3 px). Only for a tolerance
+/// chosen by hand (`SimplifyOptions::smooth_kinks`): at Auto's it is smoother
+/// by the rule's own weights but a little less faithful, which the rule
+/// refuses (testing/quality-round/kink-v20.md).
+fn smooth_kinks(pieces: &mut [Piece], cyclic: bool, tolerance: f64) {
+    let n = pieces.len();
+    let nodes = if cyclic { n } else { n.saturating_sub(1) };
+    for i in 0..nodes {
+        let j = (i + 1) % n;
+        if i == j || (pieces[i].edge.line && pieces[j].edge.line) {
+            continue;
+        }
+        let (a, b) = (&pieces[i], &pieces[j]);
+        let (Some(t), Some(u)) = (arriving(&a.edge), leaving(&b.edge)) else {
+            continue;
+        };
+        if !(KINK_MIN_TURN..KINK_TURN).contains(&signed_turn(t, u).abs()) {
+            continue;
+        }
+        let refit = |piece: &Piece, start: Point, end: Point| -> Option<(Edge, f64)> {
+            if piece.edge.line {
+                return Some((piece.edge, 0.));
+            }
+            let (cubic, error) = fit_samples(&piece.samples, start, end)?;
+            (!turns_back_more(&piece.edge.cubic, &cubic)).then_some((
+                Edge {
+                    cubic,
+                    line: false,
+                    implicit: false,
+                },
+                error,
+            ))
+        };
+        let pair = |shared: Point| -> Option<(Edge, Edge, f64)> {
+            let (first, e1) = refit(a, a.start_direction(), scale(shared, -1.))?;
+            let (second, e2) = refit(b, shared, b.end_direction())?;
+            Some((first, second, e1.max(e2)))
+        };
+        let best = if a.edge.line {
+            pair(t)
+        } else if b.edge.line {
+            pair(u)
+        } else {
+            normalized(add(t, u)).and_then(pair)
+        };
+        if let Some((first, second, error)) = best {
+            if error <= tolerance {
+                pieces[i].edge = first;
+                pieces[j].edge = second;
+            }
+        }
+    }
 }
 
 /// One stretch of boundary between two junctions, or a whole junction-free
@@ -932,7 +1035,7 @@ pub fn simplify_svg(
                         if shared {
                             stats.shared_runs += 1;
                         }
-                        let done = simplify_run(&edges, run.cyclic, options.tolerance);
+                        let done = simplify_run(&edges, run.cyclic, options);
                         cache.insert(run_key, done.clone());
                         done
                     }

@@ -47,6 +47,23 @@ pub fn run() -> Result<(), String> {
                     .ok_or("--round takes X,Y[:tiny|tight|medium|wide]")?;
                 options.rounds.push((x, y, reach));
             }
+            "--delete" => {
+                const TAKES: &str = "--delete takes X,Y[:keep]";
+                let value = args.next().ok_or(TAKES)?;
+                let (point, keep_shape) = match value.split_once(':') {
+                    Some((point, "keep")) => (point, true),
+                    Some(_) => return Err(TAKES.into()),
+                    None => (value.as_str(), false),
+                };
+                let (x, y) = point
+                    .split_once(',')
+                    .and_then(|(x, y)| {
+                        Some((x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?))
+                    })
+                    .filter(|(x, y)| x.is_finite() && y.is_finite())
+                    .ok_or(TAKES)?;
+                options.deletes.push((x, y, keep_shape));
+            }
             "--colors" => {
                 options.prep.colors = Some(
                     args.next()
@@ -211,7 +228,7 @@ pub fn run() -> Result<(), String> {
                 };
             }
             "--help" => {
-                println!("Render the app's own interface to PNG without opening or capturing any window.\nvector-magic-preview --output preview.png [--image source.png --convert --nodes] [--zoom 2] [--width 1200 --height 800] [--simplify 0.5|off] [--show save|size|colors|node-menu|shapes] [--colors N] [--background white|black|#rrggbb] [--round X,Y[:tiny|tight|medium|wide]] [--optimizer on|off] [--sticker on|off|BORDER,RIM[,shadow]] [--cut-background] [--straighten off|auto|PX] [--regularize on|off] [--primitives on|off] [--advanced SEG,SMOOTH,CURVE[,corners=on|off]] [--overlay bitmap|vector] [--pointer X,Y] [--drag X1,Y1,X2,Y2] [--reconvert] [--category blended|unblended|photo --quality high|medium|low]\nAuto settings are used unless manual category/quality is supplied. Size is 850..2400 by 600..1600. Curve simplification defaults to 0.5 px, as in the desktop; under Auto settings a conversion picks its own tolerance, so --simplify PX with --convert needs --category and --quality. --sticker on uses the widths the desktop picks for the image; --cut-background presses the Sticker card's button after converting. --pointer rests the pointer there for the hover states (the rail's resize grip and scroll bar, a node's tooltip); --drag presses at the first point and holds the button at the second (a node dragged); --reconvert converts again after converting and renders while that runs.");
+                println!("Render the app's own interface to PNG without opening or capturing any window.\nvector-magic-preview --output preview.png [--image source.png --convert --nodes] [--zoom 2] [--width 1200 --height 800] [--simplify 0.5|off] [--show save|size|colors|node-menu|shapes] [--colors N] [--background white|black|#rrggbb] [--round X,Y[:tiny|tight|medium|wide]] [--delete X,Y[:keep]] [--optimizer on|off] [--sticker on|off|BORDER,RIM[,shadow]] [--cut-background] [--straighten off|auto|PX] [--regularize on|off] [--primitives on|off] [--advanced SEG,SMOOTH,CURVE[,corners=on|off]] [--overlay bitmap|vector] [--pointer X,Y] [--drag X1,Y1,X2,Y2] [--reconvert] [--category blended|unblended|photo --quality high|medium|low]\nAuto settings are used unless manual category/quality is supplied. Size is 850..2400 by 600..1600. Curve simplification defaults to 0.5 px, as in the desktop; under Auto settings a conversion picks its own tolerance, so --simplify PX with --convert needs --category and --quality. --sticker on uses the widths the desktop picks for the image; --cut-background presses the Sticker card's button after converting. --pointer rests the pointer there for the hover states (the rail's resize grip and scroll bar, a node's tooltip); --drag presses at the first point and holds the button at the second (a node dragged); --reconvert converts again after converting and renders while that runs; --delete deletes the shown node nearest X,Y after converting (:keep refits its two pieces as one curve).");
                 return Ok(());
             }
             _ => return Err(format!("Unknown argument: {arg}")),

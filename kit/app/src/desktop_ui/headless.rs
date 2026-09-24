@@ -3,7 +3,9 @@
 use super::*;
 
 impl Desktop {
-    pub(crate) fn ui(&mut self, ctx: &egui::Context) {
+    /// One frame of the window: the desktop runs it for eframe, the browser
+    /// build (`kit/web`) for its canvas.
+    pub fn ui(&mut self, ctx: &egui::Context) {
         for event in ctx.input(|i| i.events.clone()) {
             if let egui::Event::Screenshot { image, .. } = event {
                 if let Some(path) = self.snapshot_path.take() {
@@ -12,6 +14,10 @@ impl Desktop {
                         .iter()
                         .flat_map(|p| p.to_srgba_unmultiplied())
                         .collect();
+                    if platform::IN_BROWSER {
+                        self.download_png(&path, &rgba, image.width(), image.height());
+                        continue;
+                    }
                     match image::save_buffer(
                         &path,
                         &rgba,
@@ -92,23 +98,17 @@ impl Desktop {
         self.receive_errand(ctx);
         self.receive_derivations(ctx);
         self.receive_tiles(ctx);
-        // A file dragged out of the Save popup and released back over the
-        // window is ours; it is not a request to open it.
-        if let Some(path) = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .filter_map(|f| f.path.clone())
-                .find(|p| !crate::dragout::is_staged(p))
-        }) {
+        if let Some(dropped) = ctx.input(|i| i.raw.dropped_files.iter().find_map(Dropped::of)) {
             if self.idle() {
-                self.path = path.to_string_lossy().into();
-                self.load(ctx);
+                match dropped {
+                    Dropped::Path(path) => {
+                        self.path = path.to_string_lossy().into();
+                        self.load(ctx);
+                    }
+                    Dropped::Bytes(name, bytes) => self.load_bytes(ctx, name, &bytes),
+                }
             } else {
-                let name = path.file_name().map_or_else(
-                    || path.to_string_lossy().into_owned(),
-                    |n| n.to_string_lossy().into_owned(),
-                );
+                let name = dropped.name();
                 let wait = if self.worker.is_some() {
                     "a conversion is running; cancel it (Esc) or let it finish"
                 } else if self.stopping.is_some() {
@@ -241,5 +241,34 @@ impl Desktop {
         }
         self.auto_convert_tick(ctx);
         self.save_prefs();
+    }
+}
+
+/// A file dropped on the window (a path) or on the page (its bytes).
+enum Dropped {
+    Path(PathBuf),
+    Bytes(String, Arc<[u8]>),
+}
+
+impl Dropped {
+    /// A file dragged out of the Save popup and released back over the
+    /// window is ours; it is not a request to open it.
+    fn of(file: &egui::DroppedFile) -> Option<Self> {
+        match (&file.path, &file.bytes) {
+            #[cfg(feature = "desktop")]
+            (Some(path), _) if crate::dragout::is_staged(path) => None,
+            (Some(path), _) => Some(Self::Path(path.clone())),
+            (None, Some(bytes)) => Some(Self::Bytes(file.name.clone(), bytes.clone())),
+            (None, None) => None,
+        }
+    }
+    fn name(&self) -> String {
+        match self {
+            Self::Path(path) => path.file_name().map_or_else(
+                || path.to_string_lossy().into_owned(),
+                |n| n.to_string_lossy().into_owned(),
+            ),
+            Self::Bytes(name, _) => name.clone(),
+        }
     }
 }

@@ -25,17 +25,23 @@ pub fn output_kind(output: &Path) -> Result<OutputKind, String> {
     }
 }
 
+/// The file `svg` saves as in the format `kind`: the SVG itself, or a PDF or
+/// EPS written from it in-process.
+pub fn vector_bytes(kind: OutputKind, svg: &str) -> Result<Vec<u8>, String> {
+    match kind {
+        OutputKind::Svg => Ok(svg.as_bytes().to_vec()),
+        OutputKind::Pdf => crate::pdf_eps::to_pdf(svg),
+        OutputKind::Eps => crate::pdf_eps::to_eps(svg),
+    }
+}
+
 pub fn write_vector(source: &Path, output: &Path, svg: &str) -> Result<(), String> {
     if crate::same_file(source, output) {
         return Err("Input and output must be different files".into());
     }
-    let bytes = match output_kind(output)? {
-        OutputKind::Svg => return crate::write_svg(source, output, svg),
-        OutputKind::Pdf => crate::pdf_eps::to_pdf(svg)?,
-        OutputKind::Eps => crate::pdf_eps::to_eps(svg)?,
-    };
     // Finish conversion before touching the selected output file, and never
     // truncate it in place.
+    let bytes = vector_bytes(output_kind(output)?, svg)?;
     crate::write_replacing(output, &bytes)
 }
 

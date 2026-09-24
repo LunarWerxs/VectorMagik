@@ -57,19 +57,27 @@ impl Desktop {
                         actions.open = true;
                     }
                     let can_load = idle && !self.path.trim().is_empty();
+                    // A browser tab has no paths: the field shows the open
+                    // picture's name, and pictures come from the file chooser
+                    // or a drop.
                     let field = ui.add_enabled(
-                        idle,
+                        idle && !platform::IN_BROWSER,
                         egui::TextEdit::singleline(&mut self.path)
                             .desired_width((field_width).min(ui.available_width() - 260.).max(120.))
                             .margin(Margin::symmetric(12, 8))
-                            .hint_text("Image path \u{2014} or drag a file into the window"),
+                            .hint_text(if platform::IN_BROWSER {
+                                "Open a picture, or drop one on the page"
+                            } else {
+                                "Image path \u{2014} or drag a file into the window"
+                            }),
                     );
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && can_load {
                         actions.load = true;
                     }
-                    if icon_button(ui, icon::LOAD, can_load)
-                        .on_hover_text("Load the image at this path  (Enter)")
-                        .clicked()
+                    if !platform::IN_BROWSER
+                        && icon_button(ui, icon::LOAD, can_load)
+                            .on_hover_text("Load the image at this path  (Enter)")
+                            .clicked()
                     {
                         actions.load = true;
                     }
@@ -100,7 +108,12 @@ impl Desktop {
                     let can_save = self.document.is_some() && idle;
                     let save = icon_button(ui, icon::SAVE, can_save)
                         .on_hover_text(format!(
-                            "Save as SVG, PDF or EPS, or drag the file out  ({})",
+                            "Save as SVG, PDF or EPS, {}  ({})",
+                            if platform::IN_BROWSER {
+                                "as a download"
+                            } else {
+                                "or drag the file out"
+                            },
                             ctx.format_shortcut(&SC_SAVE)
                         ))
                         .on_disabled_hover_text(if self.document.is_some() {
@@ -887,8 +900,9 @@ impl Desktop {
                         )
                         .on_hover_text(
                             "How far, in source pixels, a merged curve may stray from the \
-                         traced curves. Larger removes more nodes; circles stay round. The \
-                         vector follows as you drag.",
+                         traced curves. Larger removes more nodes and smooths the small kinks \
+                         left between them; circles stay round. The vector follows as you \
+                         drag.",
                         );
                     moved = slider.changed();
                 });
@@ -1027,7 +1041,10 @@ impl Desktop {
         let count = self.shown_counts().0.map(|(_, shown)| shown);
         // Hidden, the card shows only its switch; the heading still says
         // there are hand edits to restore (the review of September 23, 2026).
-        let by_hand = self.rounded.len() + self.straightened.len() + self.moved.len();
+        let by_hand = self.rounded.len()
+            + self.straightened.len()
+            + self.moves_shown()
+            + self.deleted_nodes.len();
         let summary = match (self.nodes, count) {
             (true, Some(n)) => format!("{n} shown"),
             (true, None) => "Shown".to_owned(),
@@ -1054,10 +1071,11 @@ impl Desktop {
                 let shown = self.nodes;
                 reveal(ui, "node-edits", shown, |ui| {
                     let mut done = Vec::new();
-                    let (rounded, squared, moved) = (
+                    let (rounded, squared, moved, deleted) = (
                         self.rounded.len(),
                         self.straightened.len(),
-                        self.moved.len(),
+                        self.moves_shown(),
+                        self.deleted_nodes.len(),
                     );
                     let plural = |n: usize| if n == 1 { "" } else { "s" };
                     if rounded > 0 {
@@ -1069,17 +1087,26 @@ impl Desktop {
                     if moved > 0 {
                         done.push(format!("{moved} moved"));
                     }
-                    let note = match (rounded, squared, moved) {
-                        (0, 0, 0) => "Click a node to round its corner, drag it to move it, \
-                                      right-click for more. Ctrl+Z undoes."
+                    if deleted > 0 {
+                        done.push(format!("{deleted} deleted"));
+                    }
+                    let note = match (rounded, squared, moved, deleted) {
+                        (0, 0, 0, 0) => "Click a node to round its corner, drag it to move it, \
+                                         right-click to delete it and more. Ctrl+Z undoes."
                             .to_owned(),
-                        (1, 0, 0) => "1 corner rounded. Click it again to restore it.".to_owned(),
-                        (n, 0, 0) => {
+                        (1, 0, 0, 0) => {
+                            "1 corner rounded. Click it again to restore it.".to_owned()
+                        }
+                        (n, 0, 0, 0) => {
                             format!("{n} corners rounded. Click one again to restore it.")
                         }
-                        (0, 0, m) => format!(
+                        (0, 0, m, 0) => format!(
                             "{m} node{} moved. Right-click one to put it back.",
                             plural(m)
+                        ),
+                        (0, 0, 0, d) => format!(
+                            "{d} node{} deleted. Ctrl+Z brings the last back.",
+                            plural(d)
                         ),
                         _ => format!("{} by hand.", done.join(" \u{00B7} ")),
                     };
@@ -1088,7 +1115,7 @@ impl Desktop {
                         egui::Button::new(RichText::new(text).size(12.))
                             .corner_radius(CornerRadius::same(10))
                     };
-                    if rounded > 1 || squared > 0 || moved > 0 {
+                    if rounded > 1 || squared > 0 || moved > 0 || deleted > 0 {
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
                             if rounded > 1 && ui.add(button("Restore all corners")).clicked() {
@@ -1110,6 +1137,18 @@ impl Desktop {
                                     .clicked()
                             {
                                 self.put_all_back();
+                            }
+                            if deleted > 0
+                                && ui
+                                    .add(button(if deleted == 1 {
+                                        "Bring the node back"
+                                    } else {
+                                        "Bring deleted nodes back"
+                                    }))
+                                    .on_hover_text("Every deleted node back in the drawing.")
+                                    .clicked()
+                            {
+                                self.restore_deleted_nodes();
                             }
                         });
                     }

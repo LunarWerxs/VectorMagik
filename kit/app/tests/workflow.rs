@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
-use vector_magic_rebuild::{load_raster, write_svg};
+use vector_magic_rebuild::{export::write_vector, load_raster};
 
 /// A handled refusal: exit code 2 and an `Error:` line naming the problem,
 /// never a panic (which exits 101 and fails `success()` just the same).
@@ -50,7 +50,7 @@ fn cli_loads_raster_exports_svg_and_refuses_to_overwrite_source() {
         .output()
         .unwrap();
     assert_refused(&rejected, "must be different files");
-    assert!(write_svg(&input, &input, &svg).is_err());
+    assert!(write_vector(&input, &input, &svg).is_err());
     assert_eq!(std::fs::read(&input).unwrap(), before);
     let invalid = Command::new(env!("CARGO_BIN_EXE_vector-magic-rebuild"))
         .args([

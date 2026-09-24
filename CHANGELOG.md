@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 (September 24, 2026)
+
+- The browser version is the Windows app itself, compiled to WebAssembly and drawn on a
+  canvas, with the same tracing, node editing, shapes, stickers, undo and saving.
+- Simplify, set by hand, smooths the small kinks it keeps (a bend under 20 degrees, within
+  the tolerance); Auto's tolerance draws exactly as before.
+- Delete a node from its right-click menu, plainly (its two curves joined, keeping their
+  outer handles) or keeping the shape (one curve refitted to the outline they drew).
+- Node markers are hollow, so the edge a node sits on shows through them.
+- The zoomed vector is drawn in the display's own pixels, sharp on screens scaled to 150%
+  or 200%; in the browser, a zoom or pan renders it once the view rests.
+
 ## 0.2.0 (September 23, 2026): first public release
 
 - The tracing engine, reconstructed in Rust with zero original machine code, reproducing

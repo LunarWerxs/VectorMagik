@@ -5,100 +5,68 @@ use super::*;
 /// Derive the shown document off the UI thread. The latest request wins, so
 /// dragging the tolerance slider never queues up stale work.
 pub(super) fn spawn_deriver(ctx: egui::Context) -> (Sender<DeriveRequest>, Receiver<DeriveResult>) {
-    let (request_tx, request_rx) = mpsc::channel::<DeriveRequest>();
-    let (result_tx, result_rx) = mpsc::channel::<DeriveResult>();
-    std::thread::spawn(move || {
-        while let Ok(mut request) = request_rx.recv() {
-            while let Ok(newer) = request_rx.try_recv() {
-                request = newer;
-            }
-            let auto = request.job == DeriveJob::Auto;
-            let settings = &request.settings;
-            let outcome = (|| {
-                let raw = request.raw.without_islands(&settings.deleted)?;
-                let (tolerance, base) = match request.job {
-                    DeriveJob::Derive => {
-                        let base = match settings.simplify {
-                            Some(t) => raw.simplified(t)?,
-                            None => raw,
-                        };
-                        (settings.simplify, base)
-                    }
-                    DeriveJob::Auto => {
-                        let (t, doc) = crate::auto_simplify_tolerance(&raw)?;
-                        (Some(t), doc)
-                    }
-                };
-                let document = Desktop::finish(base, settings)?;
-                // Painted stacked, so never Auto's own rendering of the cut-out
-                // shapes, whose edges show the background between colours.
-                let presented = Presented::of(&document, settings.sticker.as_ref())?;
-                // Counted here too, so the UI thread parses nothing per result.
-                Ok((tolerance, Derived::new(document, presented)))
-            })();
-            if result_tx
-                .send(DeriveResult {
-                    serial: request.serial,
-                    raw_version: request.raw_version,
-                    auto,
-                    outcome,
-                })
-                .is_err()
-            {
-                break;
-            }
-            ctx.request_repaint();
-        }
-    });
-    (request_tx, result_rx)
+    platform::serve(ctx, |request: DeriveRequest| {
+        let auto = request.job == DeriveJob::Auto;
+        let settings = &request.settings;
+        let outcome = (|| {
+            let raw = request.raw.without_islands(&settings.deleted)?;
+            let (tolerance, base) = match request.job {
+                DeriveJob::Derive => {
+                    let base = match settings.simplify {
+                        Some(t) if settings.simplify_by_hand => raw.simplified_by_hand(t)?,
+                        Some(t) => raw.simplified(t)?,
+                        None => raw,
+                    };
+                    (settings.simplify, base)
+                }
+                DeriveJob::Auto => {
+                    let (t, doc) = crate::auto_simplify_tolerance(&raw)?;
+                    (Some(t), doc)
+                }
+            };
+            let document = Desktop::finish(base, settings)?;
+            // Painted stacked, so never Auto's own rendering of the cut-out
+            // shapes, whose edges show the background between colours.
+            let presented = Presented::of(&document, settings.sticker.as_ref())?;
+            // Counted here too, so the UI thread parses nothing per result.
+            Ok((tolerance, Derived::new(document, presented)))
+        })();
+        Some(DeriveResult {
+            serial: request.serial,
+            raw_version: request.raw_version,
+            auto,
+            outcome,
+        })
+    })
 }
 
 /// Render crisp tiles of the vector off the UI thread. The latest request
 /// wins; the parsed tree is kept between requests for the same document.
 pub(super) fn spawn_tiler(ctx: egui::Context) -> (Sender<TileRequest>, Receiver<TileResult>) {
-    let (request_tx, request_rx) = mpsc::channel::<TileRequest>();
-    let (result_tx, result_rx) = mpsc::channel::<TileResult>();
-    std::thread::spawn(move || {
-        let mut cached: Option<(u64, crate::PreviewTree)> = None;
-        while let Ok(mut request) = request_rx.recv() {
-            while let Ok(newer) = request_rx.try_recv() {
-                request = newer;
-            }
-            if cached.as_ref().is_none_or(|(v, _)| *v != request.version) {
-                match crate::preview_tree(&request.svg) {
-                    Ok(tree) => cached = Some((request.version, tree)),
-                    Err(_) => {
-                        cached = None;
-                        continue;
-                    }
-                }
-            }
-            let Some((_, tree)) = &cached else {
-                continue;
-            };
-            if let Ok(image) = crate::render_region(
-                tree,
-                request.document_width,
-                request.scale,
-                request.origin,
-                request.size,
-            ) {
-                if result_tx
-                    .send(TileResult {
-                        version: request.version,
-                        scale: request.scale,
-                        origin: request.origin,
-                        image,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-                ctx.request_repaint();
-            }
+    let mut cached: Option<(u64, crate::PreviewTree)> = None;
+    platform::serve(ctx, move |request: TileRequest| {
+        if cached.as_ref().is_none_or(|(v, _)| *v != request.version) {
+            cached = crate::preview_tree(&request.svg)
+                .ok()
+                .map(|tree| (request.version, tree));
         }
-    });
-    (request_tx, result_rx)
+        let (_, tree) = cached.as_ref()?;
+        let image = crate::render_region(
+            tree,
+            request.document_width,
+            request.scale * request.ppp,
+            request.origin,
+            request.size,
+        )
+        .ok()?;
+        Some(TileResult {
+            version: request.version,
+            scale: request.scale,
+            ppp: request.ppp,
+            origin: request.origin,
+            image,
+        })
+    })
 }
 
 /// Pick the orientation that shows the larger picture: side by side for square
@@ -922,6 +890,7 @@ pub(super) fn render_logo(size: u32) -> Option<Vec<u8>> {
     Some(pixmap.take())
 }
 
+#[cfg(feature = "desktop")]
 pub(super) fn window_icon() -> Option<Arc<egui::IconData>> {
     let mut rgba = render_logo(64)?;
     for px in rgba.as_chunks_mut::<4>().0 {
@@ -942,14 +911,23 @@ pub(super) fn window_icon() -> Option<Arc<egui::IconData>> {
 /// The Open dialog's image filter: every extension `load_raster` decodes,
 /// which is what the image crate's png, jpeg, bmp, gif and pnm features read
 /// (`tests::the_open_dialog_lists_every_format_the_loader_decodes`).
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows system dialogs use it")
+)]
 pub(super) const OPEN_FILTER: &str = "*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.pnm;*.pbm;*.pgm;*.ppm;*.pam";
 
 /// The system dialog's process while one is open. The window no longer
 /// waits for it, so it could be closed first; `close_open_dialog` then closes
 /// the dialog too rather than leave it behind with nothing to answer.
+#[cfg_attr(
+    not(windows),
+    allow(dead_code, reason = "only the Windows system dialogs use it")
+)]
 static OPEN_DIALOG: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
 
 /// Close a system dialog still open, as the window closes.
+#[cfg(feature = "desktop")]
 pub(super) fn close_open_dialog() {
     if let Some(mut child) = OPEN_DIALOG.lock().ok().and_then(|mut open| open.take()) {
         let _ = child.kill();

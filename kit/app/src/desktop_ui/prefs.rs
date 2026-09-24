@@ -5,6 +5,7 @@
 use super::*;
 
 /// `%APPDATA%\VectorMagik\desktop.txt`, or the XDG config folder elsewhere.
+#[cfg(feature = "desktop")]
 pub(super) fn prefs_path() -> Option<PathBuf> {
     let set = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     let base = set("APPDATA")
@@ -48,6 +49,7 @@ pub(super) fn write_prefs((hold, auto): (bool, bool)) -> String {
 impl Desktop {
     /// Take the preferences the window was left with from `path`; a missing
     /// or unreadable file keeps the defaults.
+    #[cfg(feature = "desktop")]
     pub(super) fn load_prefs(&mut self, path: PathBuf) {
         if let Ok(text) = std::fs::read_to_string(&path) {
             (self.hold_compare, self.auto_convert) =
@@ -60,6 +62,11 @@ impl Desktop {
     /// memory of them, so it is not reported.
     pub(super) fn save_prefs(&mut self) {
         let now = (self.hold_compare, self.auto_convert);
+        if platform::IN_BROWSER && now != self.prefs_saved {
+            self.prefs_saved = now;
+            platform::ask(platform::Command::StorePrefs(write_prefs(now)));
+            return;
+        }
         let Some(path) = &self.prefs else {
             return;
         };

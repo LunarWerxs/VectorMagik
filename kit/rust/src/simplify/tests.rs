@@ -68,7 +68,14 @@ fn segments(d: &str) -> usize {
 #[test]
 fn a_circle_of_many_arcs_becomes_a_few_within_tolerance() {
     let svg = document(&[("#000000", circle_path(100., 100., 80., 36))]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.5 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.segments_before, 36);
     assert!(
         (3..=6).contains(&stats.segments_after),
@@ -97,7 +104,14 @@ fn the_largest_tolerance_keeps_a_big_circle_on_its_circle() {
     // less (one cubic of 120 degrees is 0.4 px off round at this radius).
     let (c, r) = (400., 264.);
     let svg = document(&[("#000000", circle_path(c, c, r, 16))]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 3. }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 3.,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert!(
         (3..16).contains(&stats.segments_after),
         "{}",
@@ -109,6 +123,58 @@ fn the_largest_tolerance_keeps_a_big_circle_on_its_circle() {
             let p = edge.cubic.evaluate(k as f64 / 50.);
             let radial = (distance(p, Point { x: c, y: c }) - r).abs();
             assert!(radial <= ON_CIRCLE + 0.02, "radial error {radial}");
+        }
+    }
+}
+
+#[test]
+fn a_kink_the_merges_keep_is_smoothed() {
+    // The GitHub mark's head as the engine traced it at 208 px: the arch
+    // between the ears meets the curve up the right ear at a 17 degree kink
+    // that no merge can remove, so it stayed at every tolerance up to 3 px
+    // (the owner, September 23, 2026). The square corners below stay sharp.
+    let d = " M 143.01 40.48 C 131.37 37.66 123.29 51.97 111.96 47.62 C 100.61 46.76 88.79 46.23 77.81 49.71 L 77.81 90 L 143.01 90 L 143.01 40.48 Z";
+    let svg = document(&[("#000000", d.to_owned())]);
+    let (out, _) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 3.,
+            smooth_kinks: true,
+        },
+    )
+    .unwrap();
+    let before = parse_path_data(d).unwrap();
+    let after = parse_path_data(&path_data(&out)[0]).unwrap();
+    let edges = &after[0].edges;
+    for (k, edge) in edges.iter().enumerate() {
+        let next = &edges[(k + 1) % edges.len()];
+        let turn = signed_turn(arriving(edge).unwrap(), leaving(next).unwrap()).abs();
+        if edge.line || next.line {
+            continue;
+        }
+        assert!(
+            turn < KINK_MIN_TURN,
+            "a {turn} degree kink at {:?}",
+            edge.end()
+        );
+    }
+    let corners = edges
+        .iter()
+        .zip(edges.iter().cycle().skip(1))
+        .filter(|(a, b)| {
+            signed_turn(arriving(a).unwrap(), leaving(b).unwrap()).abs() >= CORNER_TURN
+        })
+        .count();
+    assert_eq!(corners, 4, "{out}");
+    for edge in &before[0].edges {
+        for k in 0..=20 {
+            let p = edge.cubic.evaluate(k as f64 / 20.);
+            let near = edges
+                .iter()
+                .flat_map(|e| (0..=200).map(move |s| e.cubic.evaluate(s as f64 / 200.)))
+                .map(|q| distance(p, q))
+                .fold(f64::INFINITY, f64::min);
+            assert!(near <= 3.05, "{near} px from the traced head at {p:?}");
         }
     }
 }
@@ -136,7 +202,14 @@ fn a_shared_boundary_is_simplified_identically_on_both_sides() {
     }
     right.push_str(" L 180.00 20.00 L 180.00 180.00 Z");
     let svg = document(&[("#ff0000", left), ("#0000ff", right)]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.4 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.4,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.paths, 2);
     assert_eq!(stats.junctions, 2, "the boundary ends are junctions");
     assert!(stats.shared_runs >= 1);
@@ -166,12 +239,26 @@ fn a_shared_boundary_is_simplified_identically_on_both_sides() {
 fn sharp_corners_and_unsupported_commands_are_left_alone() {
     let square = " M 10.00 10.00 L 90.00 10.00 L 90.00 90.00 L 10.00 90.00 L 10.00 10.00 Z";
     let svg = document(&[("#000000", square.to_owned())]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.5 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!((stats.segments_before, stats.segments_after), (4, 4));
     assert_eq!(segments(&path_data(&out)[0]), 4);
     let arc = document(&[("#000000", " M 0.00 0.00 A 5 5 0 0 1 10 10 Z".to_owned())]);
     assert!(simplify_svg(&arc, SimplifyOptions::default()).is_err());
-    assert!(simplify_svg(&svg, SimplifyOptions { tolerance: 0. }).is_err());
+    assert!(simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.,
+            smooth_kinks: false
+        }
+    )
+    .is_err());
 }
 
 #[test]
@@ -183,7 +270,14 @@ fn a_tiny_tolerance_changes_nothing_and_the_rest_of_the_document_is_copied() {
             " M 0.00 0.00 L 200.00 0.00 L 200.00 200.00 L 0.00 200.00 L 0.00 0.00 Z".to_owned(),
         ),
     ]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 1e-9 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 1e-9,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.segments_before, stats.segments_after);
     assert!(out.contains("fill=\"#00ff00\"") && out.contains("viewBox=\"0 0 1000 1000\""));
     let before: HashSet<Key> = parse_path_data(&path_data(&svg)[0]).unwrap()[0]
@@ -523,7 +617,14 @@ fn two_nodes_on_one_smooth_bend_merge_into_one_segment() {
     }
     d.push_str(" L 160.00 160.00 L 40.00 160.00 L 40.00 40.00 Z");
     let svg = document(&[("#000000", d)]);
-    let (_, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.3 }).unwrap();
+    let (_, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.3,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.segments_before, 6);
     assert_eq!(
         stats.segments_after, 5,
@@ -573,7 +674,14 @@ fn a_single_shared_piece_between_junctions_keeps_each_fills_direction() {
         ("#00ff00", bottom.to_owned()),
         ("#0000ff", side.to_owned()),
     ]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.5 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.segments_before, stats.segments_after, "{out}");
     assert_eq!(walked(&out), walked(&svg), "{out}");
     assert!(no_piece_returns_to_its_start(&out), "{out}");
@@ -598,7 +706,14 @@ fn a_shared_two_piece_ring_keeps_each_fills_winding() {
     let hole = " M 0.00 0.00 L 100.00 0.00 L 100.00 100.00 L 0.00 100.00 Z M 30.00 50.00 C 30.00 72.00 70.00 72.00 70.00 50.00 C 70.00 28.00 30.00 28.00 30.00 50.00 Z";
     let disc = " M 30.00 50.00 C 30.00 28.00 70.00 28.00 70.00 50.00 C 70.00 72.00 30.00 72.00 30.00 50.00 Z";
     let svg = document(&[("#ff0000", hole.to_owned()), ("#0000ff", disc.to_owned())]);
-    let (out, stats) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.5 }).unwrap();
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     assert_eq!(stats.segments_before, stats.segments_after, "{out}");
     assert_eq!(walked(&out), walked(&svg), "{out}");
     assert!(no_piece_returns_to_its_start(&out), "{out}");
@@ -621,7 +736,14 @@ fn no_merge_cuts_a_corner_of_the_picture() {
 <path fill=\"#ff0000\" opacity=\"1.00\" d=\" M 86.00 100.00 L 100.00 100.00 L 100.00 86.00 C 94.00 88.00 88.00 94.00 86.00 100.00 Z\" />\n\
 <path fill=\"#0000ff\" opacity=\"1.00\" d=\" M 0.00 0.00 L 100.00 0.00 L 100.00 40.00 L 100.00 86.00 C 94.00 88.00 88.00 94.00 86.00 100.00 L 0.00 100.00 Z\" />\n\
 </svg>\n";
-    let (out, _) = simplify_svg(svg, SimplifyOptions { tolerance: 5. }).unwrap();
+    let (out, _) = simplify_svg(
+        svg,
+        SimplifyOptions {
+            tolerance: 5.,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     let data = path_data(&out);
     assert!(data[0].contains("L 100.00 100.00 L 100.00 86.00"), "{out}");
     assert!(!data[1].contains("L 100.00 40.00"), "{out}");
@@ -644,7 +766,14 @@ fn no_merge_cuts_a_corner_of_the_picture() {
 fn no_merge_cuts_a_square_corner_inside_the_picture() {
     let d = " M 24.00 103.99 C 26.67 104.00 29.33 104.00 31.99 104.01 C 32.00 106.67 32.00 109.33 32.01 111.99 C 34.67 112.00 37.33 112.00 39.99 112.01 C 40.00 114.67 40.00 117.33 40.01 119.99 L 40.01 140.00 L 24.00 140.00 Z";
     let svg = document(&[("#000000", d.to_owned())]);
-    let (out, _) = simplify_svg(&svg, SimplifyOptions { tolerance: 0.5 }).unwrap();
+    let (out, _) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance: 0.5,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
     for corner in ["31.99 104.01", "32.01 111.99", "39.99 112.01"] {
         assert!(path_data(&out)[0].contains(corner), "{corner}: {out}");
     }
@@ -692,7 +821,14 @@ fn no_merge_adds_a_turn_back_the_pieces_did_not_have() {
                     continue;
                 }
                 refused += 1;
-                let kept = simplify_run(&[line, arc], false, error + 1e-9);
+                let kept = simplify_run(
+                    &[line, arc],
+                    false,
+                    SimplifyOptions {
+                        tolerance: error + 1e-9,
+                        smooth_kinks: false,
+                    },
+                );
                 assert_eq!(
                     kept.len(),
                     2,

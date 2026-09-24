@@ -492,6 +492,9 @@ impl Desktop {
             // PDF and EPS take the exporter a moment; the card says so and
             // only drags once the file is there.
             let (note, color) = match &state {
+                StageState::Ready(_) if platform::IN_BROWSER => {
+                    ("Click to download".to_owned(), DIM)
+                }
                 StageState::Ready(_) => ("Drag onto your desktop or into a folder".to_owned(), DIM),
                 StageState::Writing => (
                     format!("Writing the {}\u{2026}", self.save_format.label()),
@@ -520,17 +523,18 @@ impl Desktop {
             if ready {
                 grab_cursor(ui, &response);
             }
-            if response.drag_started() {
+            if response.drag_started() || (platform::IN_BROWSER && response.clicked()) {
                 drag = true;
             }
-            if ui
-                .add(
-                    egui::Button::new(RichText::new("Choose a location\u{2026}").size(13.))
-                        .min_size(Vec2::new(ui.available_width(), 30.))
-                        .corner_radius(CornerRadius::same(10)),
-                )
-                .on_hover_text("The system save dialog, set to this format.")
-                .clicked()
+            if !platform::IN_BROWSER
+                && ui
+                    .add(
+                        egui::Button::new(RichText::new("Choose a location\u{2026}").size(13.))
+                            .min_size(Vec2::new(ui.available_width(), 30.))
+                            .corner_radius(CornerRadius::same(10)),
+                    )
+                    .on_hover_text("The system save dialog, set to this format.")
+                    .clicked()
             {
                 choose = true;
             }
@@ -619,8 +623,8 @@ impl Desktop {
     }
 
     /// The menu of a right-clicked node: the reach for its rounding,
-    /// restoring the corner, straightening and squaring it, and putting it
-    /// back where the trace had it when it was moved.
+    /// restoring the corner, straightening and squaring it, putting it back
+    /// where the trace had it when it was moved, and deleting it two ways.
     pub(super) fn node_menu_ui(&mut self, ctx: &egui::Context) {
         let Some((node, at)) = self.node_menu else {
             return;
@@ -631,10 +635,12 @@ impl Desktop {
         let base = self.base_position(&node);
         let moved = self.moved_from(&node).is_some();
         let squared = self.straightened.iter().any(|p| same_point(p, &base));
+        let refusal = self.deletion_refusal(&node);
         let mut open = true;
         let mut pick: Option<Option<Reach>> = None;
         let mut square: Option<bool> = None;
         let mut put_back = false;
+        let mut delete: Option<bool> = None;
         menu_popup(
             egui::Id::new("node-menu").with((node.x.to_bits(), node.y.to_bits())),
             ctx,
@@ -698,6 +704,33 @@ impl Desktop {
                     put_back = true;
                 }
             }
+            ui.separator();
+            let why = refusal.unwrap_or_default();
+            if ui
+                .add_enabled(refusal.is_none(), egui::Button::new("Delete node"))
+                .on_hover_text(
+                    "Takes the node out: one piece runs from the node before to the node \
+                     after, keeping their outer handles.",
+                )
+                .on_disabled_hover_text(why)
+                .clicked()
+            {
+                delete = Some(false);
+            }
+            if ui
+                .add_enabled(
+                    refusal.is_none(),
+                    egui::Button::new("Delete, keep the shape"),
+                )
+                .on_hover_text(
+                    "Takes the node out and fits one curve to the two pieces, so the \
+                     outline stays where one curve can follow it.",
+                )
+                .on_disabled_hover_text(why)
+                .clicked()
+            {
+                delete = Some(true);
+            }
         });
         match pick {
             Some(Some(reach)) => self.round_node(node, reach),
@@ -718,7 +751,10 @@ impl Desktop {
         if put_back {
             self.put_back(node);
         }
-        if !open || pick.is_some() || square.is_some() || put_back {
+        if let Some(keep_shape) = delete {
+            self.delete_node(node, keep_shape);
+        }
+        if !open || pick.is_some() || square.is_some() || put_back || delete.is_some() {
             self.node_menu = None;
         }
     }
