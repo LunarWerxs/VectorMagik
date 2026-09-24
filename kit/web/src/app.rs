@@ -29,6 +29,10 @@
 //!   11 file           str name, bytes data (dropped or picked)
 //!   12 hovering file  u8 on
 //!   13 screenshot     u32 width, u32 height, bytes RGBA (top row first)
+//!   14 reply          u32 id, u32 HTTP status (0: no response), str body:
+//!                     the answer to command 5 `id`
+//!   15 theme          u8 dark: the page's light and dark switch, sent at
+//!                     start and whenever it changes
 //! ```
 //!
 //! **Output**, at `vm_out_ptr()` / `vm_out_len()` after `vm_app_frame`
@@ -54,7 +58,12 @@
 //!   3 store prefs     str text, kept for `vm_app_start` next time
 //!   4 screenshot      read the canvas once this frame is painted and send
 //!                     it back as event 13
+//!   5 post JSON       u32 id, str URL, str body: fetch it and send the
+//!                     answer back as event 14 (the licence's redeem)
 //! ```
+//!
+//! The module imports `env.vm_now_ms`: milliseconds since 1970 on the page's
+//! monotonic clock, `performance.timeOrigin + performance.now()`.
 
 use crate::slice;
 use std::cell::RefCell;
@@ -79,7 +88,8 @@ pub unsafe extern "C" fn vm_app_start(prefs: *const u8, prefs_len: usize) -> u32
     // SAFETY: the caller hands over a buffer it allocated with `vm_alloc`.
     let prefs = String::from_utf8_lossy(unsafe { slice(prefs, prefs_len) }).into_owned();
     let ctx = egui::Context::default();
-    let app = Desktop::in_browser(&ctx, &prefs);
+    let mut app = Desktop::in_browser(&ctx, &prefs);
+    app.ask_licence_if_new();
     RUNNING.with(|running| *running.borrow_mut() = Some(Running { ctx, app }));
     0
 }
@@ -185,7 +195,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-fn read_input(bytes: &[u8]) -> Option<egui::RawInput> {
+pub(crate) fn read_input(bytes: &[u8]) -> Option<egui::RawInput> {
     let mut r = Reader { bytes };
     let time = r.f64()?;
     let size = egui::vec2(r.f32()?, r.f32()?);
@@ -294,6 +304,12 @@ fn read_input(bytes: &[u8]) -> Option<egui::RawInput> {
                     });
                 }
             }
+            14 => {
+                let (id, status) = (r.u32()?, r.u32()?);
+                let body = r.str()?;
+                platform::deliver_reply(id, u16::try_from(status).unwrap_or(0), body);
+            }
+            15 => platform::deliver_theme(r.u8()? != 0),
             _ => return None,
         }
     }
@@ -447,6 +463,12 @@ fn write_output(ctx: &egui::Context, output: egui::FullOutput) -> Vec<u8> {
                 w.str(&text);
             }
             platform::Command::Screenshot => w.u8(4),
+            platform::Command::PostJson { id, url, body } => {
+                w.u8(5);
+                w.u32(id as usize);
+                w.str(&url);
+                w.str(&body);
+            }
         }
     }
     w.bytes

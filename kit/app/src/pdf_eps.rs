@@ -14,6 +14,9 @@
 //! Anything else is refused, as is a reference to another file. EPS cannot
 //! hold partial opacity and refuses it, as the Python exporter did; it is
 //! drawn on a white page like CairoSVG's.
+//!
+//! The same reading serves the other writers (`dxf.rs`, `emf.rs`): `page`
+//! gives every painted path as segments in page space with its paint.
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -101,12 +104,116 @@ impl Default for Style {
 /// An element still open: its style, opacity, offset and children.
 type Open = (Style, f64, (f64, f64), Vec<Item>);
 
-/// A point in user space.
-type Xy = (f64, f64);
+/// A point: in user space while reading, in page space in a `Page`.
+pub type Xy = (f64, f64);
+
+/// One piece of a path outline, every coordinate absolute: SVG's `H`, `V`
+/// and quadratic pieces are already lines and cubics.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Segment {
+    /// Starts a subpath.
+    Move(Xy),
+    Line(Xy),
+    /// Two control points and the end.
+    Cubic(Xy, Xy, Xy),
+    /// Closes the subpath back to its start.
+    Close,
+}
+
+/// A painted path of a drawing out of its groups, in page space: points
+/// from the page's top-left corner, y down.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shape {
+    pub segments: Vec<Segment>,
+    pub fill: Option<[u8; 3]>,
+    /// The stroke's colour when it is drawn (a positive width).
+    pub stroke: Option<[u8; 3]>,
+    /// The stroke's width in points.
+    pub stroke_width: f64,
+    /// Miter (0), round (1) or bevel (2), as PDF numbers them.
+    pub join: u8,
+    /// Butt (0), round (1) or square (2).
+    pub cap: u8,
+    pub evenodd: bool,
+}
+
+/// A drawing as the other writers need it: its page in points and its
+/// painted paths in paint order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Page {
+    pub width: f64,
+    pub height: f64,
+    pub shapes: Vec<Shape>,
+    /// Whether anything is drawn with an opacity below 1, which EPS and EMF
+    /// cannot hold.
+    pub translucent: bool,
+}
+
+/// `svg` read as a page of flat painted paths; what `to_pdf` refuses is
+/// refused alike.
+pub fn page(svg: &str) -> Result<Page, String> {
+    let drawing = Drawing::parse(svg)?;
+    let (scale, tx, ty) = drawing.page_scale();
+    let mut shapes = Vec::new();
+    flatten(&drawing.items, (0., 0.), &mut |segments, style, offset| {
+        let at = |p: Xy| ((p.0 + offset.0) * scale + tx, (p.1 + offset.1) * scale + ty);
+        let stroke = style.stroke.filter(|_| style.stroke_width > 0.);
+        if style.fill.is_none() && stroke.is_none() {
+            return;
+        }
+        shapes.push(Shape {
+            segments: segments
+                .iter()
+                .map(|segment| match *segment {
+                    Segment::Move(p) => Segment::Move(at(p)),
+                    Segment::Line(p) => Segment::Line(at(p)),
+                    Segment::Cubic(a, b, p) => Segment::Cubic(at(a), at(b), at(p)),
+                    Segment::Close => Segment::Close,
+                })
+                .collect(),
+            fill: style.fill,
+            stroke,
+            stroke_width: style.stroke_width * scale,
+            join: style.join,
+            cap: style.cap,
+            evenodd: style.evenodd,
+        });
+    });
+    Ok(Page {
+        width: drawing.width,
+        height: drawing.height,
+        shapes,
+        translucent: drawing.translucent(),
+    })
+}
+
+/// Every shape under `items` with its style and the sum of the group
+/// offsets above it, in paint order.
+fn flatten(items: &[Item], offset: Xy, visit: &mut dyn FnMut(&[Segment], &Style, Xy)) {
+    for item in items {
+        match item {
+            Item::Shape {
+                segments, style, ..
+            } => visit(segments, style, offset),
+            Item::Group {
+                offset: (dx, dy),
+                items,
+                ..
+            } => flatten(items, (offset.0 + dx, offset.1 + dy), visit),
+        }
+    }
+}
+
+/// How deep elements may nest: the app's documents nest two deep, and
+/// every walk of the tree recurses once per level.
+const MAX_DEPTH: usize = 64;
 
 enum Item {
     Shape {
+        /// The outline as PDF path operators in user space.
         path: String,
+        /// The same outline as segments.
+        segments: Vec<Segment>,
         style: Style,
         opacity: f64,
     },
@@ -169,6 +276,9 @@ impl Drawing {
             let style = styled(inherited, &attributes)?;
             let opacity = fraction(get("opacity"))?;
             match name {
+                _ if stack.len() >= MAX_DEPTH => {
+                    return Err("The drawing nests its elements too deeply".into())
+                }
                 "svg" if root.is_none() => {
                     root = Some(page_of(&attributes)?);
                     stack.push((style, opacity, (0., 0.), Vec::new()));
@@ -185,20 +295,27 @@ impl Drawing {
                     if get("transform").is_some() {
                         return Err("Only generated vector shapes can be exported".into());
                     }
-                    let path = if name == "path" {
-                        path_ops(get("d").unwrap_or(""))?
+                    let (path, segments) = if name == "path" {
+                        let segments = path_segments(get("d").unwrap_or(""))?;
+                        (ops_text(&segments), segments)
                     } else {
                         let number = |key: &str| number(get(key).unwrap_or("0"));
-                        format!(
-                            "{} {} {} {} re\n",
-                            num(number("x")?),
-                            num(number("y")?),
-                            num(number("width")?),
-                            num(number("height")?)
-                        )
+                        let (x, y) = (number("x")?, number("y")?);
+                        let (width, height) = (number("width")?, number("height")?);
+                        let text =
+                            format!("{} {} {} {} re\n", num(x), num(y), num(width), num(height));
+                        let corners = vec![
+                            Segment::Move((x, y)),
+                            Segment::Line((x + width, y)),
+                            Segment::Line((x + width, y + height)),
+                            Segment::Line((x, y + height)),
+                            Segment::Close,
+                        ];
+                        (text, corners)
                     };
                     let shape = Item::Shape {
                         path,
+                        segments,
                         style,
                         opacity,
                     };
@@ -250,11 +367,18 @@ impl Drawing {
     /// User space onto the page, y up, the view box placed as
     /// `preserveAspectRatio="xMidYMid meet"` places it.
     fn page_matrix(&self) -> [f64; 6] {
+        let (scale, tx, ty) = self.page_scale();
+        [scale, 0., 0., -scale, tx, self.height - ty]
+    }
+
+    /// The same placement with y down: a page point is the user point times
+    /// the scale plus the offset.
+    fn page_scale(&self) -> (f64, f64, f64) {
         let [vx, vy, vw, vh] = self.view;
         let scale = (self.width / vw).min(self.height / vh);
         let tx = (self.width - vw * scale) / 2. - vx * scale;
         let ty = (self.height - vh * scale) / 2. - vy * scale;
-        [scale, 0., 0., -scale, tx, self.height - ty]
+        (scale, tx, ty)
     }
 }
 
@@ -439,9 +563,34 @@ fn attributes(text: &str) -> Result<Attributes, String> {
 
 /// SVG path data as PDF path operators in user space: every command made
 /// absolute, `H` and `V` as lines, quadratics raised to cubics.
+#[cfg(test)]
 fn path_ops(d: &str) -> Result<String, String> {
-    let mut tokens = PathTokens { rest: d };
+    Ok(ops_text(&path_segments(d)?))
+}
+
+/// Segments as PDF path operators.
+fn ops_text(segments: &[Segment]) -> String {
     let mut out = String::new();
+    for segment in segments {
+        match *segment {
+            Segment::Move(p) => {
+                let _ = writeln!(out, "{} {} m", num(p.0), num(p.1));
+            }
+            Segment::Line(p) => {
+                let _ = writeln!(out, "{} {} l", num(p.0), num(p.1));
+            }
+            Segment::Cubic(a, b, end) => write_cubic(&mut out, a, b, end),
+            Segment::Close => out.push_str("h\n"),
+        }
+    }
+    out
+}
+
+/// SVG path data as segments in user space: every command made absolute,
+/// `H` and `V` as lines, quadratics raised to cubics.
+fn path_segments(d: &str) -> Result<Vec<Segment>, String> {
+    let mut tokens = PathTokens { rest: d };
+    let mut out = Vec::new();
     let (mut current, mut start) = ((0., 0.), (0., 0.));
     // The previous cubic's second control point and quadratic's control
     // point, for `S` and `T`.
@@ -467,26 +616,26 @@ fn path_ops(d: &str) -> Result<String, String> {
         command = Some(c);
         match c.to_ascii_uppercase() {
             'Z' => {
-                out.push_str("h\n");
+                out.push(Segment::Close);
                 current = start;
             }
             'M' => {
                 current = point(&mut tokens)?;
                 start = current;
-                let _ = writeln!(out, "{} {} m", num(current.0), num(current.1));
+                out.push(Segment::Move(current));
                 command = Some(if relative { 'l' } else { 'L' });
             }
             'L' => {
                 current = point(&mut tokens)?;
-                let _ = writeln!(out, "{} {} l", num(current.0), num(current.1));
+                out.push(Segment::Line(current));
             }
             'H' => {
                 current.0 = tokens.number()? + base.0;
-                let _ = writeln!(out, "{} {} l", num(current.0), num(current.1));
+                out.push(Segment::Line(current));
             }
             'V' => {
                 current.1 = tokens.number()? + base.1;
-                let _ = writeln!(out, "{} {} l", num(current.0), num(current.1));
+                out.push(Segment::Line(current));
             }
             'C' | 'S' => {
                 let first = if c.eq_ignore_ascii_case(&'C') {
@@ -496,7 +645,7 @@ fn path_ops(d: &str) -> Result<String, String> {
                 };
                 let second = point(&mut tokens)?;
                 let end = point(&mut tokens)?;
-                write_cubic(&mut out, first, second, end);
+                out.push(Segment::Cubic(first, second, end));
                 cubic = Some(second);
                 current = end;
             }
@@ -513,7 +662,7 @@ fn path_ops(d: &str) -> Result<String, String> {
                         a.1 + 2. / 3. * (control.1 - a.1),
                     )
                 };
-                write_cubic(&mut out, toward(current), toward(end), end);
+                out.push(Segment::Cubic(toward(current), toward(end), end));
                 quad = Some(control);
                 current = end;
             }
@@ -668,6 +817,7 @@ impl Pdf {
                     path,
                     style,
                     opacity,
+                    ..
                 } => {
                     let Some(op) = paint(style) else {
                         continue;

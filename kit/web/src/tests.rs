@@ -165,3 +165,36 @@ fn a_file_that_is_not_a_picture_is_refused() {
         tab.app.status_line()
     );
 }
+
+#[test]
+fn the_pages_light_and_dark_switch_is_the_apps() {
+    // The page's event 15, as `app.mjs` sends it: the input header (time,
+    // size, pixels per point, largest texture, focus, modifiers), then one
+    // event.
+    let theme = |dark: u8| {
+        let mut bytes = Vec::new();
+        bytes.extend(0f64.to_le_bytes());
+        for v in [1280f32, 860., 1.] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(4096u32.to_le_bytes());
+        bytes.extend([1, 0]);
+        bytes.extend(1u32.to_le_bytes());
+        bytes.extend([15, dark]);
+        assert!(crate::app::read_input(&bytes).is_some());
+    };
+    let mut tab = Tab::new(
+        "look=glass
+",
+    );
+    tab.frame(Vec::new(), Vec::new());
+    assert!(tab.ctx.style().visuals.dark_mode);
+    theme(0);
+    tab.frame(Vec::new(), Vec::new());
+    assert!(!tab.ctx.style().visuals.dark_mode);
+    theme(1);
+    tab.frame(Vec::new(), Vec::new());
+    assert!(tab.ctx.style().visuals.dark_mode);
+    // The page's last word is what the app reads.
+    assert!(platform::page_dark() == Some(true));
+}

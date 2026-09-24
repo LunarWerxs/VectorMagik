@@ -29,10 +29,8 @@ impl Desktop {
         let zoom_range = self.zoom_range();
         let mut fit = false;
         egui::TopBottomPanel::bottom("status")
-            .frame(
-                bar_frame(6),
-            )
-            .show_separator_line(false)
+            .frame(bar_frame(6, false))
+            .show_separator_line(pal().separators)
             .show(ctx, |ui| {
                 let width = ui.available_width();
                 let (show_detail, show_size) = (width >= 820., width >= 600.);
@@ -41,14 +39,14 @@ impl Desktop {
                     |ui| {
                         ui.spacing_mut().item_spacing.x = 8.;
                         let (color, text_color) = match self.status_kind {
-                            StatusKind::Info => (DIM, TEXT),
-                            StatusKind::Busy => (ACCENT, TEXT),
-                            StatusKind::Done => (OK, TEXT),
-                            StatusKind::Error => (ERR, ERR),
+                            StatusKind::Info => (pal().dim, pal().text),
+                            StatusKind::Busy => (pal().accent, pal().text),
+                            StatusKind::Done => (pal().ok, pal().text),
+                            StatusKind::Error => (pal().err, pal().err),
                         };
                         match self.status_kind {
                             StatusKind::Busy => {
-                                ui.add(egui::Spinner::new().size(15.).color(ACCENT));
+                                ui.add(egui::Spinner::new().size(15.).color(pal().accent));
                             }
                             kind => {
                                 let glyph = match kind {
@@ -80,7 +78,7 @@ impl Desktop {
                         ui.label(
                             RichText::new(format!("{:.0}%", self.fit * self.zoom * 100.))
                                 .size(12.)
-                                .color(DIM),
+                                .color(pal().dim),
                         )
                         .on_hover_text(
                             "Zoom. Ctrl+scroll over a picture zooms around the pointer.",
@@ -264,7 +262,7 @@ impl Desktop {
                          the curves scale exactly. 1\u{00D7} is the source's pixel size.",
                     )
                     .size(11.5)
-                    .color(FAINT),
+                    .color(pal().faint),
                 );
             }
             StatPopup::Colors => {
@@ -275,7 +273,7 @@ impl Desktop {
                     RichText::new(format!("{} colors", colors.len()))
                         .size(13.5)
                         .family(family.clone())
-                        .color(TEXT),
+                        .color(pal().text),
                 );
                 let removable = colors.len() > 1 && self.idle();
                 egui::ScrollArea::vertical()
@@ -295,9 +293,9 @@ impl Desktop {
                                     Stroke::new(
                                         1_f32,
                                         if response.hovered() {
-                                            Color32::WHITE
+                                            pal().text
                                         } else {
-                                            BORDER
+                                            pal().border
                                         },
                                     ),
                                     StrokeKind::Inside,
@@ -313,7 +311,7 @@ impl Desktop {
                                     ui.ctx().copy_text(hex.clone());
                                     copied = Some(hex.clone());
                                 }
-                                ui.label(RichText::new(hex).size(12.5).color(TEXT));
+                                ui.label(RichText::new(hex).size(12.5).color(pal().text));
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -345,7 +343,7 @@ impl Desktop {
                         "Fill colors of the vector, most used first. \u{00D7} drops a color.",
                     )
                     .size(11.5)
-                    .color(FAINT),
+                    .color(pal().faint),
                 );
             }
         });
@@ -384,7 +382,7 @@ impl Desktop {
         });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.;
-            ui.label(RichText::new("Width").size(12.5).color(DIM));
+            ui.label(RichText::new("Width").size(12.5).color(pal().dim));
             let mut width = (w * self.output_scale).round() as u32;
             if ui
                 .add(
@@ -402,13 +400,80 @@ impl Desktop {
             ui.label(
                 RichText::new(format!("\u{00D7}  {height} px"))
                     .size(12.5)
-                    .color(DIM),
+                    .color(pal().dim),
             );
         });
     }
 
     /// Save: the format first, the size, then either the system dialog or a
     /// file to drag straight onto the desktop or into a folder.
+    /// The Appearance popup under its header button: the look, and light or
+    /// dark (a tab follows the page's switch instead).
+    pub(super) fn appearance_popup(&mut self, ctx: &egui::Context) {
+        if !self.appearance_open {
+            return;
+        }
+        let family = self.title_family.clone();
+        let mut open = true;
+        anchored_popup(
+            egui::Id::new("appearance-popup"),
+            ctx,
+            self.appearance_anchor,
+            egui::RectAlign::BOTTOM_END,
+        )
+        .open_bool(&mut open)
+        .show(|ui| {
+            popup_heading(ui, 290., "Appearance", 14., &family);
+            ui.label(RichText::new("Look").size(12.5).color(pal().dim));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.;
+                for look in Look::ALL {
+                    if choice_width(ui, look.label(), self.look == look, 88.)
+                        .on_hover_text(look.about())
+                        .clicked()
+                    {
+                        self.look = look;
+                    }
+                }
+            });
+            if self.look != Look::Classic {
+                ui.label(
+                    RichText::new("Glass and Studio preview a new design.")
+                        .size(11.5)
+                        .color(pal().faint),
+                );
+            }
+            ui.add_space(2.);
+            ui.label(RichText::new("Light or dark").size(12.5).color(pal().dim));
+            if platform::IN_BROWSER {
+                ui.label(
+                    RichText::new(
+                        "Follows the light and dark switch at the top right of the page.",
+                    )
+                    .size(11.5)
+                    .color(pal().faint),
+                );
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.;
+                    for theme in ThemeChoice::ALL {
+                        if choice_width(ui, theme.label(), self.theme == theme, 88.)
+                            .on_hover_text(match theme {
+                                ThemeChoice::System => "Follow Windows' light or dark setting",
+                                ThemeChoice::Dark => "Always dark",
+                                ThemeChoice::Light => "Always light",
+                            })
+                            .clicked()
+                        {
+                            self.theme = theme;
+                        }
+                    }
+                });
+            }
+        });
+        self.appearance_open = open;
+    }
+
     pub(super) fn save_popup(&mut self, ctx: &egui::Context) {
         if !self.save_open {
             return;
@@ -417,7 +482,7 @@ impl Desktop {
             self.save_open = false;
             return;
         };
-        if self.document.is_none() {
+        if self.document.is_none() && self.foreign.is_none() {
             self.save_open = false;
             return;
         }
@@ -439,11 +504,11 @@ impl Desktop {
         )
         .open_bool(&mut open)
         .show(|ui| {
-            popup_heading(ui, 300., "Save vector", 14., &family);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.;
+            popup_heading(ui, 330., "Save vector", 14., &family);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
                 for format in Format::ALL {
-                    if choice_width(ui, format.label(), self.save_format == format, 60.)
+                    if choice_width(ui, format.label(), self.save_format == format, 42.)
                         .on_hover_text(format.hint())
                         .clicked()
                     {
@@ -454,12 +519,76 @@ impl Desktop {
             ui.add_space(2.);
             self.size_controls(ui, unit_size);
             ui.add_space(2.);
-            toggle_row(ui, &mut self.save_stacked, "Stacked shapes", None).on_hover_text(
-                "Each color runs a hair under the edges of the colors drawn after \
-                 it, so no thin background line shows between two colors (as \
-                 shown). Off: every shape cut out exactly and nothing overlaps, as \
-                 cutting machines want.",
+            // The original's "Shape mode", with the app's stacked drawing
+            // first: what the window shows.
+            labelled_row(ui, "Shapes", |ui| {
+                ui.spacing_mut().item_spacing.x = 4.;
+                let cut_plain = !self.save_stacked && !self.save_grouped;
+                let cut_grouped = !self.save_stacked && self.save_grouped;
+                if choice_width(ui, "Cut-outs", cut_plain, 64.)
+                    .on_hover_text(
+                        "Every shape cut out of the ones below it, nothing overlapping, \
+                         in one list (the original's \"cut-outs in shapes below\").",
+                    )
+                    .clicked()
+                {
+                    (self.save_stacked, self.save_grouped) = (false, false);
+                }
+                if choice_width(ui, "By color", cut_grouped, 64.)
+                    .on_hover_text(
+                        "Cut-outs grouped by colour, one group per colour: the original's \
+                         default, handy for recolouring in an editor.",
+                    )
+                    .clicked()
+                {
+                    (self.save_stacked, self.save_grouped) = (false, true);
+                }
+                if choice_width(ui, "Stacked", self.save_stacked, 64.)
+                    .on_hover_text(
+                        "As shown: each color runs a hair under the edges of the colors \
+                         drawn after it, so no thin background line shows between two \
+                         colors.",
+                    )
+                    .clicked()
+                {
+                    self.save_stacked = true;
+                }
+            });
+            toggle_row(ui, &mut self.save_stroke, "Stroke shape boundaries", None).on_hover_text(
+                "Also draw every shape's outline in its own colour, a hair wide, so \
+                 viewers that leave faint seams between neighbouring shapes show \
+                 none (the original's stroking mode).",
             );
+            if self.save_format == Format::Dxf {
+                labelled_row(ui, "DXF curves", |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.;
+                    use crate::export::DxfMode;
+                    for (mode, label, hint) in [
+                        (
+                            DxfMode::CoarseLines,
+                            "Few lines",
+                            "Lines only, curves as fewer lines: a smaller file.",
+                        ),
+                        (
+                            DxfMode::FineLines,
+                            "Many lines",
+                            "Lines only, curves as more lines: a larger file.",
+                        ),
+                        (
+                            DxfMode::Splines,
+                            "Curves",
+                            "Lines and spline curves (the original's default).",
+                        ),
+                    ] {
+                        if choice_width(ui, label, self.save_dxf == mode, 64.)
+                            .on_hover_text(hint)
+                            .clicked()
+                        {
+                            self.save_dxf = mode;
+                        }
+                    }
+                });
+            }
             ui.add_space(4.);
             let name = self.export_name();
             let (rect, response) = ui.allocate_exact_size(
@@ -471,8 +600,12 @@ impl Desktop {
             ui.painter().rect(
                 rect,
                 10.,
-                if hovered { SURFACE_HIGH } else { CHIP },
-                Stroke::new(1_f32, if hovered { ACCENT } else { BORDER }),
+                if hovered {
+                    pal().surface_high
+                } else {
+                    pal().chip
+                },
+                Stroke::new(1_f32, if hovered { pal().accent } else { pal().border }),
                 StrokeKind::Inside,
             );
             ui.painter().text(
@@ -480,33 +613,36 @@ impl Desktop {
                 Align2::LEFT_CENTER,
                 icon::FILE,
                 FontId::proportional(26.),
-                if hovered { ACCENT } else { DIM },
+                if hovered { pal().accent } else { pal().dim },
             );
             ui.painter().text(
                 rect.left_center() + Vec2::new(56., -9.),
                 Align2::LEFT_CENTER,
                 &name,
                 FontId::proportional(13.5),
-                if ready { TEXT } else { DIM },
+                if ready { pal().text } else { pal().dim },
             );
             // PDF and EPS take the exporter a moment; the card says so and
             // only drags once the file is there.
             let (note, color) = match &state {
                 StageState::Ready(_) if platform::IN_BROWSER => {
-                    ("Click to download".to_owned(), DIM)
+                    ("Click to download".to_owned(), pal().dim)
                 }
-                StageState::Ready(_) => ("Drag onto your desktop or into a folder".to_owned(), DIM),
+                StageState::Ready(_) => (
+                    "Drag onto your desktop or into a folder".to_owned(),
+                    pal().dim,
+                ),
                 StageState::Writing => (
                     format!("Writing the {}\u{2026}", self.save_format.label()),
-                    DIM,
+                    pal().dim,
                 ),
                 StageState::Failed(error) => {
                     let line = error.lines().next().unwrap_or("");
                     let short: String = line.chars().take(44).collect();
                     if short.len() < line.len() {
-                        (format!("{short}\u{2026}"), ERR)
+                        (format!("{short}\u{2026}"), pal().err)
                     } else {
-                        (short, ERR)
+                        (short, pal().err)
                     }
                 }
             };
@@ -578,7 +714,7 @@ impl Desktop {
                 egui::Label::new(
                     RichText::new(format!("Shape \u{00B7} {}", shape.color))
                         .size(11.5)
-                        .color(DIM),
+                        .color(pal().dim),
                 )
                 .selectable(false),
             );
@@ -658,7 +794,8 @@ impl Desktop {
                 (None, false) => "Corner node".to_owned(),
             };
             ui.add(
-                egui::Label::new(RichText::new(heading).size(11.5).color(DIM)).selectable(false),
+                egui::Label::new(RichText::new(heading).size(11.5).color(pal().dim))
+                    .selectable(false),
             );
             for reach in Reach::ALL {
                 if ui

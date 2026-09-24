@@ -4,13 +4,21 @@ use super::*;
 
 impl Desktop {
     pub(super) fn workspace(&mut self, ctx: &egui::Context) {
+        if self.foreign.is_some() {
+            self.foreign_workspace(ctx);
+            return;
+        }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BACKDROP).inner_margin(Margin {
-                left: 6,
-                right: 12,
-                top: 12,
-                bottom: 12,
-            }))
+            .frame(
+                egui::Frame::new()
+                    .fill(pal().canvas_fill())
+                    .inner_margin(Margin {
+                        left: 6,
+                        right: 12,
+                        top: 12,
+                        bottom: 12,
+                    }),
+            )
             .show(ctx, |ui| {
                 let avail = ui.available_size();
                 let aspect = self
@@ -50,175 +58,173 @@ impl Desktop {
     pub(super) fn card(&mut self, ui: &mut egui::Ui, vector: bool) {
         let family = self.title_family.clone();
         let has_vector = self.vector_texture().is_some();
-        egui::Frame::new()
-            .fill(SURFACE)
-            .stroke(Stroke::new(1_f32, BORDER))
-            .corner_radius(12)
-            .show(ui, |ui| {
-                ui.set_min_size(ui.available_size());
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
-                egui::Frame::new()
-                    .inner_margin(Margin {
-                        left: 14,
-                        right: 14,
-                        top: 10,
-                        bottom: 8,
-                    })
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.spacing_mut().item_spacing = Vec2::new(8., 4.);
-                        let overlay = self.view == View::Overlay;
-                        let can_show_input = !vector
-                            && self.working_source.is_some()
-                            && self
-                                .converted_prep
-                                .as_ref()
-                                .is_some_and(|p| !p.is_identity());
-                        let mut switch: Option<bool> = None;
-                        let mut held: Option<bool> = None;
-                        let mut flip_input = false;
-                        egui::Sides::new().spacing(16.).shrink_right().show(
-                            ui,
-                            |ui| {
-                                let (glyph, title) = match (vector, overlay) {
-                                    (true, false) => (icon::VECTOR, "Vector result"),
-                                    (false, false) => (icon::SOURCE, "Source image"),
-                                    (true, true) => (icon::VECTOR, "Vector"),
-                                    (false, true) => (icon::SOURCE, "Bitmap"),
-                                };
-                                ui.label(RichText::new(glyph).size(14.).color(ACCENT));
-                                ui.label(
-                                    RichText::new(title)
-                                        .size(14.)
-                                        .family(family.clone())
-                                        .color(TEXT),
-                                );
-                                if overlay {
-                                    ui.add_space(6.);
-                                    let hold = self.hold_compare;
-                                    let bitmap = choice_width(ui, "B  Bitmap", !vector, 76.)
-                                        .on_hover_text(if hold {
-                                            "Hold to see the source image  (hold B)"
-                                        } else {
-                                            "Show the source image  (B)"
-                                        });
-                                    let vector_button = ui
-                                        .add_enabled(
-                                            has_vector,
-                                            egui::Button::new(
-                                                RichText::new("V  Vector")
-                                                    .size(12.)
-                                                    .color(if vector { ON_ACCENT } else { TEXT }),
-                                            )
-                                            .fill(if vector { ACCENT } else { CHIP })
-                                            .stroke(Stroke::new(
-                                                1_f32,
-                                                if vector { ACCENT } else { BORDER },
-                                            ))
-                                            .corner_radius(CornerRadius::same(11))
-                                            .min_size(Vec2::new(74., 22.)),
+        card_frame().show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            ui.spacing_mut().item_spacing = Vec2::ZERO;
+            egui::Frame::new()
+                .inner_margin(Margin {
+                    left: 14,
+                    right: 14,
+                    top: 10,
+                    bottom: 8,
+                })
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing = Vec2::new(8., 4.);
+                    let overlay = self.view == View::Overlay;
+                    let can_show_input = !vector
+                        && self.working_source.is_some()
+                        && self
+                            .converted_prep
+                            .as_ref()
+                            .is_some_and(|p| !p.is_identity());
+                    let mut switch: Option<bool> = None;
+                    let mut held: Option<bool> = None;
+                    let mut flip_input = false;
+                    egui::Sides::new().spacing(16.).shrink_right().show(
+                        ui,
+                        |ui| {
+                            let (glyph, title) = match (vector, overlay) {
+                                (true, false) => (icon::VECTOR, "Vector result"),
+                                (false, false) => (icon::SOURCE, "Source image"),
+                                (true, true) => (icon::VECTOR, "Vector"),
+                                (false, true) => (icon::SOURCE, "Bitmap"),
+                            };
+                            ui.label(RichText::new(glyph).size(14.).color(pal().accent));
+                            ui.label(
+                                RichText::new(title)
+                                    .size(14.)
+                                    .family(family.clone())
+                                    .color(pal().text),
+                            );
+                            if overlay {
+                                ui.add_space(6.);
+                                let hold = self.hold_compare;
+                                let bitmap = choice_width(ui, "B  Bitmap", !vector, 76.)
+                                    .on_hover_text(if hold {
+                                        "Hold to see the source image  (hold B)"
+                                    } else {
+                                        "Show the source image  (B)"
+                                    });
+                                let vector_button = ui
+                                    .add_enabled(
+                                        has_vector,
+                                        egui::Button::new(
+                                            RichText::new("V  Vector").size(12.).color(if vector {
+                                                pal().on_accent
+                                            } else {
+                                                pal().text
+                                            }),
                                         )
-                                        .on_hover_text(if hold {
-                                            "Hold to see the vector  (hold V)"
-                                        } else {
-                                            "Show the vector  (V)"
-                                        })
-                                        .on_disabled_hover_text("Convert the image first");
-                                    if hold {
-                                        // Shown while held; letting go puts
-                                        // back the picture chosen before.
-                                        held = if bitmap.is_pointer_button_down_on() {
-                                            Some(false)
-                                        } else if vector_button.is_pointer_button_down_on() {
-                                            Some(true)
-                                        } else {
-                                            None
-                                        };
-                                    } else if bitmap.clicked() {
-                                        switch = Some(false);
-                                    } else if vector_button.clicked() {
-                                        switch = Some(true);
-                                    }
-                                    ui.checkbox(
-                                        &mut self.hold_compare,
-                                        RichText::new("Hold").size(12.).color(DIM),
+                                        .fill(if vector { pal().accent } else { pal().chip })
+                                        .stroke(Stroke::new(
+                                            1_f32,
+                                            if vector { pal().accent } else { pal().border },
+                                        ))
+                                        .corner_radius(CornerRadius::same(11))
+                                        .min_size(Vec2::new(74., 22.)),
                                     )
-                                    .on_hover_text(
-                                        "Hold to compare: pressing Bitmap or Vector (or holding \
+                                    .on_hover_text(if hold {
+                                        "Hold to see the vector  (hold V)"
+                                    } else {
+                                        "Show the vector  (V)"
+                                    })
+                                    .on_disabled_hover_text("Convert the image first");
+                                if hold {
+                                    // Shown while held; letting go puts
+                                    // back the picture chosen before.
+                                    held = if bitmap.is_pointer_button_down_on() {
+                                        Some(false)
+                                    } else if vector_button.is_pointer_button_down_on() {
+                                        Some(true)
+                                    } else {
+                                        None
+                                    };
+                                } else if bitmap.clicked() {
+                                    switch = Some(false);
+                                } else if vector_button.clicked() {
+                                    switch = Some(true);
+                                }
+                                ui.checkbox(
+                                    &mut self.hold_compare,
+                                    RichText::new("Hold").size(12.).color(pal().dim),
+                                )
+                                .on_hover_text(
+                                    "Hold to compare: pressing Bitmap or Vector (or holding \
                                          B or V) shows that picture only while held, then goes \
                                          back. Untick to switch pictures with a click.",
-                                    );
-                                }
-                                if can_show_input
-                                    && choice_width(ui, "As traced", self.show_engine_input, 90.)
-                                        .on_hover_text(
-                                            "Show the image as it was traced (color limit, \
+                                );
+                            }
+                            if can_show_input
+                                && choice_width(ui, "As traced", self.show_engine_input, 90.)
+                                    .on_hover_text(
+                                        "Show the image as it was traced (color limit, \
                                              background and merges applied) instead of the \
                                              original.",
-                                        )
-                                        .clicked()
-                                {
-                                    flip_input = true;
-                                }
-                            },
-                            |ui| {
-                                let detail = if vector {
-                                    // The counts live in the footer's chips.
-                                    if self.worker.is_some() {
-                                        "Converting\u{2026}".into()
-                                    } else {
-                                        String::new()
-                                    }
+                                    )
+                                    .clicked()
+                            {
+                                flip_input = true;
+                            }
+                        },
+                        |ui| {
+                            let detail = if vector {
+                                // The counts live in the footer's chips.
+                                if self.worker.is_some() {
+                                    "Converting\u{2026}".into()
                                 } else {
-                                    match &self.raster {
-                                        Some(r) => {
-                                            let name = std::path::Path::new(&self.loaded_path)
-                                                .file_name()
-                                                .map(|n| n.to_string_lossy().into_owned())
-                                                .unwrap_or_default();
-                                            // The size lives in the footer's chip.
-                                            let _ = r;
-                                            let mut text = name;
-                                            if let (Some(prep), true) =
-                                                (&self.converted_prep, self.working.is_some())
-                                            {
-                                                if let Some(n) = prep.colors {
-                                                    text.push_str(&format!(" \u{00B7} {n} colors"));
-                                                }
-                                                if prep.background.is_some() {
-                                                    text.push_str(" \u{00B7} flattened");
-                                                }
-                                                if !prep.recolors.is_empty() {
-                                                    text.push_str(&format!(
-                                                        " \u{00B7} {} merged",
-                                                        prep.recolors.len()
-                                                    ));
-                                                }
+                                    String::new()
+                                }
+                            } else {
+                                match &self.raster {
+                                    Some(r) => {
+                                        let name = std::path::Path::new(&self.loaded_path)
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().into_owned())
+                                            .unwrap_or_default();
+                                        // The size lives in the footer's chip.
+                                        let _ = r;
+                                        let mut text = name;
+                                        if let (Some(prep), true) =
+                                            (&self.converted_prep, self.working.is_some())
+                                        {
+                                            if let Some(n) = prep.colors {
+                                                text.push_str(&format!(" \u{00B7} {n} colors"));
                                             }
-                                            text
+                                            if prep.background.is_some() {
+                                                text.push_str(" \u{00B7} flattened");
+                                            }
+                                            if !prep.recolors.is_empty() {
+                                                text.push_str(&format!(
+                                                    " \u{00B7} {} merged",
+                                                    prep.recolors.len()
+                                                ));
+                                            }
                                         }
-                                        None => String::new(),
+                                        text
                                     }
-                                };
-                                ui.add(
-                                    egui::Label::new(RichText::new(detail).size(12.).color(DIM))
-                                        .truncate(),
-                                );
-                            },
-                        );
-                        if let Some(vector) = switch {
-                            self.overlay_vector = vector;
-                        }
-                        if overlay && held != self.peek_button {
-                            self.peek_button = held;
-                            ui.ctx().request_repaint();
-                        }
-                        if flip_input {
-                            self.show_engine_input = !self.show_engine_input;
-                        }
-                    });
-                self.card_body(ui, vector);
-            });
+                                    None => String::new(),
+                                }
+                            };
+                            ui.add(
+                                egui::Label::new(RichText::new(detail).size(12.).color(pal().dim))
+                                    .truncate(),
+                            );
+                        },
+                    );
+                    if let Some(vector) = switch {
+                        self.overlay_vector = vector;
+                    }
+                    if overlay && held != self.peek_button {
+                        self.peek_button = held;
+                        ui.ctx().request_repaint();
+                    }
+                    if flip_input {
+                        self.show_engine_input = !self.show_engine_input;
+                    }
+                });
+            self.card_body(ui, vector);
+        });
     }
 
     pub(super) fn card_body(&mut self, ui: &mut egui::Ui, vector: bool) {
@@ -476,20 +482,24 @@ impl Desktop {
                             paint_piece(
                                 &painter,
                                 piece,
-                                Stroke::new(1.5_f32, ACCENT),
+                                Stroke::new(1.5_f32, pal().accent),
                                 scale,
                                 &to_screen,
                             );
                         }
-                        painter.circle_stroke(to_screen(from), 4., Stroke::new(1_f32, FAINT));
+                        painter.circle_stroke(to_screen(from), 4., Stroke::new(1_f32, pal().faint));
                         node_marker(&painter, to_screen(&to), rounding.is_some());
-                        painter.circle_stroke(to_screen(&to), 7., Stroke::new(1.5_f32, ACCENT));
+                        painter.circle_stroke(
+                            to_screen(&to),
+                            7.,
+                            Stroke::new(1.5_f32, pal().accent),
+                        );
                     }
                 }
                 ui.painter().rect_stroke(
                     rect.expand(1.),
                     0.,
-                    Stroke::new(1_f32, BORDER),
+                    Stroke::new(1_f32, pal().border),
                     StrokeKind::Inside,
                 );
                 response
@@ -803,8 +813,8 @@ impl Desktop {
         painter.rect(
             plate,
             6.,
-            Color32::from_rgba_unmultiplied(14, 17, 21, 236),
-            Stroke::new(1_f32, BORDER),
+            faded(pal().backdrop.to_opaque(), 0.93),
+            Stroke::new(1_f32, pal().border),
             StrokeKind::Outside,
         );
         painter.image(
@@ -821,8 +831,8 @@ impl Desktop {
         painter.rect(
             window,
             2.,
-            Color32::from_rgba_unmultiplied(79, 209, 197, 44),
-            Stroke::new(1.5_f32, ACCENT),
+            faded(pal().accent, 0.17),
+            Stroke::new(1.5_f32, pal().accent),
             StrokeKind::Inside,
         );
         let response = ui.interact(
@@ -853,7 +863,7 @@ impl Desktop {
             (false, _, false) => (
                 icon::OPEN,
                 "Drop an image here",
-                "PNG, JPEG, BMP, GIF or PNM. Or use the folder button above.",
+                "PNG, JPEG, GIF, BMP, TIFF, TGA, PNM or Photoshop PSD, or the folder button above.\nSVG, PDF, AI and EPS files too: trace them, or convert them as they are.",
             ),
             (true, true, _) => (
                 icon::CONVERT,
@@ -868,16 +878,12 @@ impl Desktop {
         };
         if !vector {
             if dropping {
-                painter.rect_filled(
-                    inner,
-                    10.,
-                    Color32::from_rgba_unmultiplied(79, 209, 197, 22),
-                );
+                painter.rect_filled(inner, 10., faded(pal().accent, 0.09));
             }
             dashed_rect(
                 &painter,
                 inner,
-                Stroke::new(1.5_f32, if dropping { ACCENT } else { FAINT }),
+                Stroke::new(1.5_f32, if dropping { pal().accent } else { pal().faint }),
             );
         }
         let center = inner.center();
@@ -886,21 +892,21 @@ impl Desktop {
             Align2::CENTER_CENTER,
             glyph,
             FontId::proportional(44.),
-            if dropping { ACCENT } else { FAINT },
+            if dropping { pal().accent } else { pal().faint },
         );
         painter.text(
             center + Vec2::new(0., 14.),
             Align2::CENTER_CENTER,
             title,
             FontId::new(16., self.title_family.clone()),
-            TEXT,
+            pal().text,
         );
         painter.text(
             center + Vec2::new(0., 38.),
             Align2::CENTER_CENTER,
             hint,
             FontId::proportional(12.5),
-            DIM,
+            pal().dim,
         );
     }
 }

@@ -3,11 +3,21 @@ use vector_rebuild::raster::{Raster, Rgba};
 pub mod auto;
 #[cfg(feature = "ui")]
 pub mod desktop_ui;
+pub mod dxf;
+pub mod emf;
 pub mod engine;
+pub mod eps_import;
 pub mod export;
+pub mod import;
+#[cfg(feature = "licence")]
+pub mod licence;
 pub mod pdf_eps;
+pub mod pdf_import;
+pub mod psd;
 #[cfg(feature = "desktop")]
 pub mod snapshot;
+#[cfg(feature = "render")]
+pub mod svg_import;
 
 /// Whether saving to `output` would replace `source`: the same path, or an
 /// existing file that resolves to it. Every save that has a source asks this
@@ -156,6 +166,17 @@ pub const BROWSER_MAX_PIXELS: u64 = 50_000_000;
 
 /// `load_raster` with a pixel limit of `max_pixels`.
 pub fn load_raster_up_to(path: &Path, max_pixels: u64) -> Result<Raster, String> {
+    // Photoshop documents are read by psd.rs: `image` reads neither PSD nor
+    // PSB.
+    let mut head = [0; 4];
+    let photoshop = std::fs::File::open(path)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut head))
+        .is_ok()
+        && head == *b"8BPS";
+    if photoshop {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        return psd::decode(&bytes, max_pixels);
+    }
     decode_up_to(
         || {
             image::ImageReader::open(path)
@@ -170,6 +191,9 @@ pub fn load_raster_up_to(path: &Path, max_pixels: u64) -> Result<Raster, String>
 /// A picture from its file's `bytes` (a file dropped in a browser tab), with
 /// a pixel limit of `max_pixels`.
 pub fn decode_raster_up_to(bytes: &[u8], max_pixels: u64) -> Result<Raster, String> {
+    if bytes.starts_with(b"8BPS") {
+        return psd::decode(bytes, max_pixels);
+    }
     decode_up_to(
         || {
             image::ImageReader::new(std::io::Cursor::new(bytes))

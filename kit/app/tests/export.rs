@@ -17,7 +17,7 @@ fn save_formats_preserve_svg_and_emit_vector_pdf_eps() {
     std::fs::write(&source, b"unchanged source").unwrap();
     for extension in ["svg", "PDF", "eps"] {
         let output = dir.join(format!("vector with spaces.{extension}"));
-        write_vector(&source, &output, SVG).unwrap();
+        write_vector(&source, &output, SVG, &Default::default()).unwrap();
         let result = std::fs::read(&output).unwrap();
         match extension {
             "svg" => assert_eq!(result, SVG.as_bytes()),
@@ -39,14 +39,14 @@ fn export_failures_preserve_source_and_existing_output() {
     let dir = folder("failures");
     let source = dir.join("source.svg");
     std::fs::write(&source, SVG).unwrap();
-    assert!(write_vector(&source, &source, SVG).is_err());
+    assert!(write_vector(&source, &source, SVG, &Default::default()).is_err());
     let output = dir.join("keep.eps");
     std::fs::write(&output, b"previous output").unwrap();
     let alpha = SVG.replace("fill-rule=", "opacity=\"0.5\" fill-rule=");
-    let error = write_vector(&source, &output, &alpha).unwrap_err();
+    let error = write_vector(&source, &output, &alpha, &Default::default()).unwrap_err();
     assert!(error.contains("transparency"));
     assert_eq!(std::fs::read(output).unwrap(), b"previous output");
-    assert!(write_vector(&source, &dir.join("wrong.png"), SVG).is_err());
+    assert!(write_vector(&source, &dir.join("wrong.tif"), SVG, &Default::default()).is_err());
     assert_eq!(std::fs::read_to_string(source).unwrap(), SVG);
 }
 
@@ -57,7 +57,7 @@ fn the_output_format_is_known_before_any_work() {
     assert_eq!(output_kind(Path::new("a.svg")), Ok(OutputKind::Svg));
     assert_eq!(output_kind(Path::new("dir.v2/A.PDF")), Ok(OutputKind::Pdf));
     assert_eq!(output_kind(Path::new("a.Eps")), Ok(OutputKind::Eps));
-    for bad in ["a.png", "a", "a.svg.bak", ".svg"] {
+    for bad in ["a.tif", "a", "a.svg.bak", ".svg"] {
         assert!(output_kind(Path::new(bad)).is_err(), "{bad}");
     }
 }
@@ -71,7 +71,7 @@ fn exporter_rejects_external_resources_and_embedded_bitmaps() {
         r#"<svg xmlns="http://www.w3.org/2000/svg"><path fill="url(https://invalid.example/fill)"/></svg>"#,
     ].iter().enumerate() {
         let output = dir.join(format!("blocked-{i}.pdf"));
-        assert!(write_vector(&source, &output, svg).is_err());
+        assert!(write_vector(&source, &output, svg, &Default::default()).is_err());
         assert!(!output.exists());
     }
 }

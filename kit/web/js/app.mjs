@@ -30,7 +30,10 @@ void main() {
   out_color = v_rgba * texture(u_sampler, v_tc);
 }`;
 
-const ACCEPT = 'image/png,image/jpeg,image/gif,image/bmp,.png,.jpg,.jpeg,.gif,.bmp,.pnm,.pbm,.pgm,.ppm,.pam';
+// Pictures, Photoshop documents, and the vector files the app asks about
+// (trace them from pixels or convert them as they are).
+const ACCEPT = 'image/png,image/jpeg,image/gif,image/bmp,image/tiff,.png,.jpg,.jpeg,.gif,.bmp,.tif,.tiff,.tga,.pnm,.pbm,.pgm,.ppm,.pam,'
+  + '.psd,.psb,image/vnd.adobe.photoshop,.svg,image/svg+xml,.pdf,application/pdf,.ai,.eps,.ps,application/postscript';
 const PREVENT_KEYS = new Set([
   'Tab', 'Backspace', 'Delete', 'Enter', 'Escape', ' ', 'ArrowLeft', 'ArrowRight',
   'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown',
@@ -74,11 +77,14 @@ const evPaste = (text) => () => new Bytes().u8(9).str(text).done();
 const evFile = (name, data) => () => new Bytes().u8(11).str(name).bytes(data).done();
 const evHover = (on) => () => new Bytes().u8(12).u8(on).done();
 const evShot = (w, h, rgba) => () => new Bytes().u8(13).u32(w).u32(h).bytes(rgba).done();
+const evReply = (id, status, body) => () => new Bytes().u8(14).u32(id).u32(status).str(body).done();
+const evTheme = (dark) => () => new Bytes().u8(15).u8(dark ? 1 : 0).done();
 
 export async function startApp(canvas, { wasmUrl, onError } = {}) {
   const bytes = await (await fetch(wasmUrl)).arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {
-    env: { vm_now_ms: () => performance.now() },
+    // Milliseconds since 1970 on the monotonic clock: a stopwatch and a date.
+    env: { vm_now_ms: () => performance.timeOrigin + performance.now() },
   });
   const e = instance.exports;
 
@@ -340,7 +346,13 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
     if (copied) navigator.clipboard?.writeText(copied).catch(() => {});
     const url = str();
     const newTab = view.getUint8(p); p += 1;
-    if (url) window.open(url, newTab ? '_blank' : '_self', 'noopener');
+    // A new tab, unless a blocker refuses it (the frame runs just after the
+    // click): then the page itself goes there rather than doing nothing.
+    if (url) {
+      const tab = newTab ? window.open(url, '_blank') : null;
+      if (tab) tab.opener = null;
+      else window.location.assign(url);
+    }
 
     const nextSeconds = view.getFloat64(p, true); p += 8;
     repaintAt = nextSeconds >= 0 ? now + nextSeconds * 1000 : Infinity;
@@ -360,8 +372,20 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
       } else if (tag === 3) {
         const text = str();
         try { localStorage.setItem('vectormagik.prefs', text); } catch { /* private mode */ }
+        // The app's answer to "personal or commercial use?" is the site's
+        // license choice too (its header badge, 'vm-license').
+        const use = /^licence_use=(personal|commercial)/m.exec(text);
+        if (use) {
+          try { localStorage.setItem('vm-license', use[1]); } catch { /* private mode */ }
+          window.dispatchEvent(new CustomEvent('vm-license'));
+        }
       } else if (tag === 4) {
         screenshot = true;
+      } else if (tag === 5) {
+        const id = view.getUint32(p, true); p += 4;
+        const url = str();
+        const body = str();
+        postJson(id, url, body);
       }
     }
 
@@ -382,6 +406,14 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
       flipped.set(px.subarray((h - 1 - y) * row, (h - y) * row), y * row);
     }
     push(evShot(w, h, flipped));
+  }
+
+  // The licence's one network call: its reply goes back as an event, 0 for
+  // no response at all.
+  function postJson(id, url, body) {
+    fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+      .then(async (r) => push(evReply(id, r.status, await r.text())))
+      .catch(() => push(evReply(id, 0, '')));
   }
 
   function download(name, mime, data) {
@@ -552,12 +584,32 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   // --- start the app -------------------------------------------------------
   let prefs = '';
   try { prefs = localStorage.getItem('vectormagik.prefs') || ''; } catch { /* private mode */ }
+  // A visitor who already told the site personal or commercial use is not
+  // asked again by the app.
+  try {
+    const choice = localStorage.getItem('vm-license');
+    if ((choice === 'personal' || choice === 'commercial') && !/^licence_use=/m.test(prefs)) {
+      prefs += `licence_use=${choice}\r\n`;
+    }
+  } catch { /* private mode */ }
   const prefsBytes = encoder.encode(prefs);
   const prefsLen = Math.max(prefsBytes.length, 1);
   const prefsPtr = e.vm_alloc(prefsLen);
   if (prefsBytes.length) new Uint8Array(e.memory.buffer, prefsPtr, prefsBytes.length).set(prefsBytes);
   e.vm_app_start(prefsPtr, prefsBytes.length);
   e.vm_dealloc(prefsPtr, prefsLen);
+
+  // The page's light and dark switch (data-theme on <html>) is the app's
+  // too; without one, the system's preference.
+  const pageDark = () => {
+    const theme = document.documentElement.dataset.theme;
+    if (theme === 'light' || theme === 'dark') return theme === 'dark';
+    return !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+  };
+  const sendTheme = () => { push(evTheme(pageDark())); wake(); };
+  const themeWatch = new MutationObserver(sendTheme);
+  themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  sendTheme();
 
   resize();
   canvas.focus({ preventScroll: true });
@@ -572,6 +624,7 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
       rafId = 0;
       waitId = 0;
       ro.disconnect();
+      themeWatch.disconnect();
       ctrl.abort();
       hiddenInput.remove();
     },

@@ -6,12 +6,26 @@ impl Desktop {
     pub(super) fn header(&mut self, ctx: &egui::Context, actions: &mut Actions) {
         let family = self.title_family.clone();
         egui::TopBottomPanel::top("header")
-            .frame(bar_frame(9))
-            .show_separator_line(false)
+            .frame(bar_frame(9, true))
+            .show_separator_line(pal().separators)
             .show(ctx, |ui| {
                 let idle = self.idle();
                 ui.horizontal(|ui| {
                     let full = ui.max_rect();
+                    let gap = 8.;
+                    // What the toolbar needs besides the path field: the icon
+                    // buttons, Convert, the two view chips, the Appearance
+                    // button and the gaps. In a narrow window the title's
+                    // words give way first, then the field shrinks.
+                    let icons = if platform::IN_BROWSER { 3. } else { 5. };
+                    let fixed = 36. * icons + 112. + 96. + 70. + 36. + gap * 10. + 6.;
+                    let title = 30. + 10. + 140. + 12.;
+                    let show_title = full.width() - title - fixed >= 160.;
+                    let lead = if show_title { title } else { 30. + 12. };
+                    let field_width = (full.width() * 0.34)
+                        .clamp(200., 560.)
+                        .min(full.width() - lead - fixed - 8.)
+                        .max(120.);
                     ui.spacing_mut().item_spacing.x = 10.;
                     if let Some(logo) = &self.logo {
                         ui.add(egui::Image::new(egui::load::SizedTexture::new(
@@ -19,31 +33,30 @@ impl Desktop {
                             Vec2::splat(30.),
                         )));
                     }
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.;
-                        ui.set_min_width(140.);
-                        ui.label(
-                            RichText::new("VectorMagik")
-                                .size(17.)
-                                .family(family.clone())
-                                .color(TEXT),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new("Offline raster to vector")
-                                    .size(11.)
-                                    .color(DIM),
-                            )
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                        );
-                    });
+                    if show_title {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.;
+                            ui.set_min_width(140.);
+                            ui.label(
+                                RichText::new("VectorMagik")
+                                    .size(17.)
+                                    .family(family.clone())
+                                    .color(pal().text),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new("Offline raster to vector")
+                                        .size(11.)
+                                        .color(pal().dim),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                            );
+                        });
+                    }
                     // The toolbar sits centred in the window, not in what is
-                    // left beside the title.
-                    let gap = 8.;
-                    // Five icon buttons, Convert, the path field and the two view
-                    // chips, centred as one group.
-                    let field_width = (full.width() * 0.34).clamp(200., 560.);
-                    let group_width = 36. * 5. + 112. + field_width + 96. + 70. + gap * 9.;
+                    // left beside the title: the icon buttons, Convert, the
+                    // path field and the two view chips as one group.
+                    let group_width = 36. * icons + 112. + field_width + 96. + 70. + gap * 9.;
                     let start = (full.center().x - group_width / 2.).max(ui.cursor().min.x + 12.);
                     ui.add_space((start - ui.cursor().min.x).max(0.));
                     ui.spacing_mut().item_spacing.x = gap;
@@ -63,7 +76,7 @@ impl Desktop {
                     let field = ui.add_enabled(
                         idle && !platform::IN_BROWSER,
                         egui::TextEdit::singleline(&mut self.path)
-                            .desired_width((field_width).min(ui.available_width() - 260.).max(120.))
+                            .desired_width(field_width)
                             .margin(Margin::symmetric(12, 8))
                             .hint_text(if platform::IN_BROWSER {
                                 "Open a picture, or drop one on the page"
@@ -88,9 +101,10 @@ impl Desktop {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new(format!("{}  Cancel", icon::CLOSE)).color(TEXT),
+                                    RichText::new(format!("{}  Cancel", icon::CLOSE))
+                                        .color(pal().text),
                                 )
-                                .stroke(Stroke::new(1_f32, WARN))
+                                .stroke(Stroke::new(1_f32, pal().warn))
                                 .corner_radius(CornerRadius::same(16))
                                 .min_size(Vec2::new(112., 32.)),
                             )
@@ -105,7 +119,7 @@ impl Desktop {
                     } else if self.convert_button(ui, ctx, can_convert) {
                         actions.convert = true;
                     }
-                    let can_save = self.document.is_some() && idle;
+                    let can_save = (self.document.is_some() || self.foreign.is_some()) && idle;
                     let save = icon_button(ui, icon::SAVE, can_save)
                         .on_hover_text(format!(
                             "Save as SVG, PDF or EPS, {}  ({})",
@@ -125,12 +139,16 @@ impl Desktop {
                     if save.clicked() {
                         actions.save = true;
                     }
-                    if icon_button(ui, icon::CAMERA, idle)
-                        .on_hover_text(format!(
-                            "Save this window as a PNG  ({})",
-                            ctx.format_shortcut(&SC_PREVIEW)
-                        ))
-                        .clicked()
+                    // The window's own picture, for reports; in a tab it only
+                    // downloaded a screenshot the visitors of September 24,
+                    // 2026 took for a camera that went wrong.
+                    if !platform::IN_BROWSER
+                        && icon_button(ui, icon::CAMERA, idle)
+                            .on_hover_text(format!(
+                                "Save this window as a PNG  ({})",
+                                ctx.format_shortcut(&SC_PREVIEW)
+                            ))
+                            .clicked()
                     {
                         actions.preview = true;
                     }
@@ -157,6 +175,14 @@ impl Desktop {
                     {
                         self.view = View::Overlay;
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let button = icon_button(ui, icon::APPEARANCE, true)
+                            .on_hover_text("Appearance: the look, light or dark");
+                        self.appearance_anchor = button.rect;
+                        if button.clicked() {
+                            self.appearance_open = !self.appearance_open;
+                        }
+                    });
                 });
             });
     }
@@ -166,15 +192,17 @@ impl Desktop {
         let convert = if can_convert {
             egui::Button::new(
                 RichText::new(format!("{}  Convert", icon::CONVERT))
-                    .color(ON_ACCENT)
+                    .color(pal().on_accent)
                     .strong(),
             )
-            .fill(ACCENT)
-            .stroke(Stroke::new(1_f32, ACCENT))
+            .fill(pal().accent)
+            .stroke(Stroke::new(1_f32, pal().accent))
             .corner_radius(CornerRadius::same(16))
         } else {
-            egui::Button::new(RichText::new(format!("{}  Convert", icon::CONVERT)).color(TEXT))
-                .corner_radius(CornerRadius::same(16))
+            egui::Button::new(
+                RichText::new(format!("{}  Convert", icon::CONVERT)).color(pal().text),
+            )
+            .corner_radius(CornerRadius::same(16))
         };
         ui.add_enabled(can_convert, convert.min_size(Vec2::new(112., 32.)))
             .on_hover_text(format!(
@@ -194,16 +222,20 @@ impl Desktop {
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
         let family = self.title_family.clone();
         let panel = egui::SidePanel::left("controls")
-            .frame(egui::Frame::new().fill(BACKDROP).inner_margin(Margin {
-                left: 12,
-                right: 6,
-                top: 12,
-                bottom: 10,
-            }))
+            .frame(
+                egui::Frame::new()
+                    .fill(pal().rail_fill())
+                    .inner_margin(Margin {
+                        left: 12,
+                        right: 6,
+                        top: 12,
+                        bottom: 10,
+                    }),
+            )
             .resizable(true)
             .default_width(296.)
             .width_range(250.0..=400.)
-            .show_separator_line(false)
+            .show_separator_line(pal().separators)
             .show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("rail-hints")
                     .frame(egui::Frame::new().inner_margin(Margin {
@@ -316,11 +348,11 @@ impl Desktop {
             }
         }
         let color = if dragging {
-            ACCENT
+            pal().accent
         } else if ready {
-            DIM
+            pal().dim
         } else {
-            Color32::from_rgba_unmultiplied(104, 112, 120, 150)
+            faded(pal().faint, 0.6)
         };
         ui.painter().rect_filled(thumb, width / 2., color);
         let offset = offset.clamp(0., range);
@@ -339,6 +371,7 @@ impl Desktop {
         self.curves_card(ui, family);
         self.shapes_card(ui, family);
         self.sticker_card(ui, family);
+        self.licence_card(ui, family);
     }
 
     /// The original's advanced dialog: segmentation complexity, contour
@@ -423,11 +456,13 @@ impl Desktop {
                             egui::Sides::new().show(
                                 ui,
                                 |ui| {
-                                    ui.label(RichText::new(label).size(12.5).color(DIM));
+                                    ui.label(RichText::new(label).size(12.5).color(pal().dim));
                                 },
                                 |ui| {
                                     ui.label(
-                                        RichText::new(value.to_string()).size(12.5).color(TEXT),
+                                        RichText::new(value.to_string())
+                                            .size(12.5)
+                                            .color(pal().text),
                                     );
                                 },
                             );
@@ -443,7 +478,11 @@ impl Desktop {
                             );
                     });
                     if self.advanced_stale() && !self.conversion_stale() && self.worker.is_none() {
-                        ui.label(RichText::new(self.stale_hint()).size(11.5).color(WARN));
+                        ui.label(
+                            RichText::new(self.stale_hint())
+                                .size(11.5)
+                                .color(pal().warn),
+                        );
                     }
                 });
             },
@@ -524,7 +563,7 @@ impl Desktop {
                         egui::Sides::new().show(
                             ui,
                             |ui| {
-                                ui.label(RichText::new(label).size(12.5).color(DIM));
+                                ui.label(RichText::new(label).size(12.5).color(pal().dim));
                             },
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 6.;
@@ -532,7 +571,7 @@ impl Desktop {
                                 ui.label(
                                     RichText::new(format!("{width:.0} px"))
                                         .size(12.5)
-                                        .color(TEXT),
+                                        .color(pal().text),
                                 );
                             },
                         );
@@ -593,7 +632,9 @@ impl Desktop {
                             }
                         )
                     };
-                    ui.add(egui::Label::new(RichText::new(note).size(11.5).color(FAINT)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(note).size(11.5).color(pal().faint)).wrap(),
+                    );
                 });
                 if cut {
                     self.cut_background();
@@ -652,10 +693,10 @@ impl Desktop {
                             None => "Open an image to detect its type and quality.".into(),
                         };
                         inset(ui, |ui| {
-                            ui.label(RichText::new(text).size(12.5).color(DIM));
+                            ui.label(RichText::new(text).size(12.5).color(pal().dim));
                         });
                     } else {
-                        ui.label(RichText::new("Image type").size(12.).color(DIM));
+                        ui.label(RichText::new("Image type").size(12.).color(pal().dim));
                         egui::ComboBox::from_id_salt("category")
                             .width(ui.available_width())
                             .selected_text(crate::auto::category_name(self.options.category))
@@ -673,7 +714,7 @@ impl Desktop {
                                 }
                             });
                         ui.add_space(4.);
-                        ui.label(RichText::new("Source quality").size(12.).color(DIM));
+                        ui.label(RichText::new("Source quality").size(12.).color(pal().dim));
                         egui::ComboBox::from_id_salt("quality")
                             .width(ui.available_width())
                             .selected_text(format!("{:?}", self.options.quality))
@@ -786,7 +827,7 @@ impl Desktop {
                      off is the original result.",
                     );
                     if let Some(note) = self.raw_document.as_deref().and_then(optimizer_note) {
-                        ui.label(RichText::new(note).size(11.5).color(DIM));
+                        ui.label(RichText::new(note).size(11.5).color(pal().dim));
                     }
                 });
                 // Not greyed while a conversion runs: switching it off is
@@ -805,7 +846,11 @@ impl Desktop {
                      Opening an image never converts it.",
                 );
                 if self.conversion_stale() && self.worker.is_none() {
-                    ui.label(RichText::new(self.stale_hint()).size(11.5).color(WARN));
+                    ui.label(
+                        RichText::new(self.stale_hint())
+                            .size(11.5)
+                            .color(pal().warn),
+                    );
                 }
             },
         );
@@ -863,7 +908,7 @@ impl Desktop {
                         ui.label(
                             RichText::new(format!("{:.2} px", self.simplify_tolerance))
                                 .size(12.5)
-                                .color(TEXT),
+                                .color(pal().text),
                         );
                         let label = if self.auto_pending {
                             "Auto\u{2026}"
@@ -951,7 +996,7 @@ impl Desktop {
                     egui::Sides::new().show(
                         ui,
                         |ui| {
-                            ui.label(RichText::new("Bow").size(12.5).color(DIM));
+                            ui.label(RichText::new("Bow").size(12.5).color(pal().dim));
                         },
                         |ui| {
                             ui.spacing_mut().item_spacing.x = 8.;
@@ -960,7 +1005,7 @@ impl Desktop {
                             } else {
                                 format!("{:.2} px", self.straighten_tolerance)
                             };
-                            ui.label(RichText::new(shown).size(12.5).color(TEXT));
+                            ui.label(RichText::new(shown).size(12.5).color(pal().text));
                             if ui
                                 .add_enabled(
                                     !self.straighten_auto,
@@ -1009,7 +1054,7 @@ impl Desktop {
                 } else {
                     counts
                 };
-                ui.label(RichText::new(note).size(11.5).color(FAINT));
+                ui.label(RichText::new(note).size(11.5).color(pal().faint));
                 if straight_moved {
                     self.straighten_auto = false;
                 }
@@ -1110,7 +1155,9 @@ impl Desktop {
                         ),
                         _ => format!("{} by hand.", done.join(" \u{00B7} ")),
                     };
-                    ui.add(egui::Label::new(RichText::new(note).size(11.5).color(FAINT)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(note).size(11.5).color(pal().faint)).wrap(),
+                    );
                     let button = |text: &str| {
                         egui::Button::new(RichText::new(text).size(12.))
                             .corner_radius(CornerRadius::same(10))
@@ -1192,12 +1239,19 @@ impl Desktop {
                 };
                 let button =
                     egui::Button::new(RichText::new(label).size(12.5).color(if selecting {
-                        ON_ACCENT
+                        pal().on_accent
                     } else {
-                        TEXT
+                        pal().text
                     }))
-                    .fill(if selecting { ACCENT } else { CHIP })
-                    .stroke(Stroke::new(1_f32, if selecting { ACCENT } else { BORDER }))
+                    .fill(if selecting { pal().accent } else { pal().chip })
+                    .stroke(Stroke::new(
+                        1_f32,
+                        if selecting {
+                            pal().accent
+                        } else {
+                            pal().border
+                        },
+                    ))
                     .corner_radius(CornerRadius::same(13))
                     .min_size(Vec2::new(ui.available_width(), 26.));
                 if ui
@@ -1242,7 +1296,7 @@ impl Desktop {
                             ui.label(
                                 RichText::new(format!("{} selected", resolved.len()))
                                     .size(12.5)
-                                    .color(TEXT),
+                                    .color(pal().text),
                             );
                             if pill(ui, "Delete")
                                 .on_hover_text("Remove the selected shapes from the vector.")
@@ -1282,7 +1336,9 @@ impl Desktop {
                     (r, m) => format!("{r} deleted \u{00B7} {m} merged."),
                 };
                 if !note.is_empty() {
-                    ui.add(egui::Label::new(RichText::new(note).size(11.5).color(FAINT)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(note).size(11.5).color(pal().faint)).wrap(),
+                    );
                 }
                 let mut undelete = false;
                 let mut unmerge = false;

@@ -117,6 +117,112 @@ pub enum Command {
     StorePrefs(String),
     /// Read the canvas once this frame is painted and send it back.
     Screenshot,
+    /// POST `body` as JSON to `url` and hand the reply back tagged `id`
+    /// (`deliver_reply`): the licence's one network call.
+    PostJson { id: u32, url: String, body: String },
+}
+
+/// One JSON POST's reply: the HTTP status (0 when nothing came back) and the
+/// body.
+pub type Reply = (u16, String);
+
+/// POST `body` as JSON to `url`; the reply arrives once on the returned
+/// channel. The window sends it from a thread of its own (20 s at most); a
+/// tab asks the page, which fetches and hands the reply back as an event.
+pub(super) fn post_json(ctx: &egui::Context, url: &str, body: String) -> Receiver<Reply> {
+    let (tx, rx) = mpsc::channel::<Reply>();
+    #[cfg(feature = "desktop")]
+    {
+        let (ctx, url) = (ctx.clone(), url.to_owned());
+        std::thread::spawn(move || {
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .timeout_global(Some(std::time::Duration::from_secs(20)))
+                .build()
+                .into();
+            let reply = agent
+                .post(&url)
+                .header("content-type", "application/json")
+                .header(
+                    "user-agent",
+                    concat!("VectorMagik/", env!("CARGO_PKG_VERSION")),
+                )
+                .send(body.as_str())
+                .and_then(|mut response| {
+                    let status = response.status().as_u16();
+                    Ok((status, response.body_mut().read_to_string()?))
+                })
+                .unwrap_or_else(|error| (0, error.to_string()));
+            let _ = tx.send(reply);
+            ctx.request_repaint();
+        });
+    }
+    #[cfg(not(feature = "desktop"))]
+    {
+        let _ = ctx;
+        let id = browser::REPLIES.with(|replies| {
+            let mut replies = replies.borrow_mut();
+            let id = replies.keys().max().map_or(1, |last| last + 1);
+            replies.insert(id, tx);
+            id
+        });
+        ask(Command::PostJson {
+            id,
+            url: url.to_owned(),
+            body,
+        });
+    }
+    rx
+}
+
+/// In a tab: the page's reply to `Command::PostJson` `id`.
+pub fn deliver_reply(id: u32, status: u16, body: String) {
+    #[cfg(not(feature = "desktop"))]
+    browser::REPLIES.with(|replies| {
+        if let Some(tx) = replies.borrow_mut().remove(&id) {
+            let _ = tx.send((status, body));
+        }
+    });
+    #[cfg(feature = "desktop")]
+    let _ = (id, status, body);
+}
+
+/// In a tab: whether the page's light and dark switch reads dark, as the
+/// page last said (event 15); `None` in the window and before the page has.
+pub fn page_dark() -> Option<bool> {
+    #[cfg(not(feature = "desktop"))]
+    {
+        browser::PAGE_DARK.with(std::cell::Cell::get)
+    }
+    #[cfg(feature = "desktop")]
+    None
+}
+
+/// In a tab: the page's switch now reads dark (`true`) or light.
+pub fn deliver_theme(dark: bool) {
+    #[cfg(not(feature = "desktop"))]
+    browser::PAGE_DARK.with(|page| page.set(Some(dark)));
+    #[cfg(feature = "desktop")]
+    let _ = dark;
+}
+
+/// Open `url` in the user's browser: a tab asks the page (egui's own open
+/// command, which the page carries out); the window, whose eframe is built
+/// without its link opener, hands it to the system.
+pub(super) fn open_url(ctx: &egui::Context, url: &str) {
+    #[cfg(feature = "desktop")]
+    {
+        let _ = ctx;
+        #[cfg(windows)]
+        let opened = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn();
+        #[cfg(not(windows))]
+        let opened = std::process::Command::new("xdg-open").arg(url).spawn();
+        drop(opened);
+    }
+    #[cfg(not(feature = "desktop"))]
+    ctx.open_url(egui::OpenUrl::new_tab(url));
 }
 
 /// Ask the page for something (in the window, nothing is asked).
@@ -157,6 +263,11 @@ mod browser {
     }
 
     thread_local! {
+        /// The page's light and dark switch, dark when true (`page_dark`).
+        pub(super) static PAGE_DARK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+        /// The JSON POSTs sent to the page and waiting for their replies.
+        pub(super) static REPLIES: RefCell<std::collections::HashMap<u32, std::sync::mpsc::Sender<super::Reply>>> =
+            RefCell::new(std::collections::HashMap::new());
         pub(super) static JOBS: RefCell<Vec<Job>> = const { RefCell::new(Vec::new()) };
         pub(super) static SERVICES: RefCell<Vec<Service>> = const { RefCell::new(Vec::new()) };
         pub(super) static COMMANDS: RefCell<Vec<Command>> = const { RefCell::new(Vec::new()) };

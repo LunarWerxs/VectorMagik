@@ -9,6 +9,7 @@ impl Desktop {
         if let Some(path) = prefs::prefs_path() {
             app.load_prefs(path);
         }
+        app.ask_licence_if_new();
         if let Some(path) = std::env::args_os()
             .nth(1)
             .map(|a| a.to_string_lossy().into_owned())
@@ -25,7 +26,40 @@ impl Desktop {
         (app.hold_compare, app.auto_convert) =
             prefs::parse_prefs(prefs, (app.hold_compare, app.auto_convert));
         app.prefs_saved = (app.hold_compare, app.auto_convert);
+        app.licence = prefs::parse_licence(prefs);
+        app.licence_saved = app.licence.clone();
+        (app.look, app.theme, app.licence_use) = prefs::parse_appearance(prefs);
+        app.appearance_saved = (app.look, app.theme, app.licence_use);
         app
+    }
+    /// Put the first-run question on screen when the preferences hold no
+    /// answer and no licence: the window and the page call it at start;
+    /// tests and snapshots start without it.
+    pub fn ask_licence_if_new(&mut self) {
+        self.ask_licence = self.licence_use.is_none() && self.licence.key.is_empty();
+    }
+    /// The look, and light or dark, as the Appearance popup sets them.
+    pub fn set_appearance(&mut self, look: Look, theme: ThemeChoice) {
+        self.look = look;
+        self.theme = theme;
+    }
+    /// Put the chosen look in force, light or dark: the page's switch in a
+    /// tab, Windows' setting under System, else the choice. The style is
+    /// rebuilt only when that changed.
+    pub(super) fn apply_appearance(&mut self, ctx: &egui::Context) {
+        let dark = match (platform::page_dark(), self.theme) {
+            (Some(dark), _) => dark,
+            (None, ThemeChoice::Dark) => true,
+            (None, ThemeChoice::Light) => false,
+            (None, ThemeChoice::System) => ctx
+                .system_theme()
+                .is_none_or(|theme| theme == egui::Theme::Dark),
+        };
+        look::set(self.look, dark);
+        if self.applied != Some((self.look, dark)) {
+            self.applied = Some((self.look, dark));
+            apply_theme(ctx, self.title_family.clone());
+        }
     }
     /// The drawing as it is saved, once nothing is left running for it; for
     /// the browser build's check that the app there draws what the desktop
@@ -44,6 +78,7 @@ impl Desktop {
         #[cfg(feature = "desktop")]
         crate::dragout::tidy();
         let title_family = install_fonts(ctx);
+        look::set(Look::Classic, true);
         apply_theme(ctx, title_family.clone());
         let logo = render_logo(64).map(|rgba| {
             ctx.load_texture(
@@ -106,6 +141,24 @@ impl Desktop {
             rail_bar_since: None,
             prefs: None,
             prefs_saved: (false, true),
+            licence: Default::default(),
+            licence_saved: Default::default(),
+            licence_input: String::new(),
+            licence_reply: None,
+            licence_note: None,
+            licence_renewed: false,
+            licence_use: None,
+            ask_licence: false,
+            prompt_key: false,
+            licence_opened: false,
+            look: Look::Classic,
+            theme: ThemeChoice::Dark,
+            appearance_saved: (Look::Classic, ThemeChoice::Dark, None),
+            applied: Some((Look::Classic, true)),
+            appearance_open: false,
+            appearance_anchor: egui::Rect::NOTHING,
+            vector_offer: None,
+            foreign: None,
             deriver: Some(spawn_deriver(ctx.clone())),
             derive_serial: 0,
             derive_pending: None,
@@ -119,7 +172,8 @@ impl Desktop {
             // the nodes shown: how the owner works (September 23, 2026).
             view: View::Overlay,
             overlay_vector: true,
-            collapsed: [false; 6],
+            // The Licence card starts folded to its one line.
+            collapsed: [false, false, false, false, false, false, true],
             advanced_on: false,
             sliders: Sliders::default(),
             regularize: true,
@@ -155,6 +209,9 @@ impl Desktop {
             source_size: None,
             save_format: Format::Svg,
             save_stacked: true,
+            save_grouped: true,
+            save_stroke: false,
+            save_dxf: crate::export::DxfMode::default(),
             save_open: false,
             save_anchor: egui::Rect::NOTHING,
             stat_popup: None,
@@ -290,7 +347,9 @@ impl Desktop {
     #[cfg(feature = "desktop")]
     pub(crate) fn open_overlay(&mut self, overlay: Overlay, at: egui::Pos2) {
         match overlay {
-            Overlay::Save => self.save_open = self.document.is_some(),
+            Overlay::Save => self.save_open = self.document.is_some() || self.foreign.is_some(),
+            Overlay::Licence => self.ask_licence = true,
+            Overlay::Appearance => self.appearance_open = true,
             Overlay::Size => self.stat_popup = Some(StatPopup::Size),
             Overlay::Colors => self.stat_popup = Some(StatPopup::Colors),
             Overlay::NodeMenu => {
@@ -935,6 +994,7 @@ impl Desktop {
         self.border_opaque = false;
     }
     pub(super) fn close(&mut self) {
+        self.foreign = None;
         self.clear_result();
         self.clear_edits();
         self.forget_edits();
@@ -957,21 +1017,79 @@ impl Desktop {
     /// review of September 23, 2026: a bad file dropped on the window
     /// cleared them all first).
     pub(super) fn load(&mut self, ctx: &egui::Context) {
-        let loaded =
-            crate::load_raster_up_to(std::path::Path::new(&self.path), crate::DESKTOP_MAX_PIXELS);
-        self.take_loaded(ctx, loaded);
+        match std::fs::read(&self.path) {
+            Ok(bytes) => {
+                let name = self.path.clone();
+                self.open_bytes(ctx, &name, &bytes, crate::DESKTOP_MAX_PIXELS);
+            }
+            Err(error) => self.take_loaded(ctx, Err(format!("{}: {error}", self.path))),
+        }
     }
     /// Open the picture `name` from its file's bytes: a file dropped on or
     /// picked in the browser tab, which has no paths.
     pub(super) fn load_bytes(&mut self, ctx: &egui::Context, name: String, bytes: &[u8]) {
-        self.path = name;
-        let loaded = crate::decode_raster_up_to(bytes, crate::BROWSER_MAX_PIXELS);
-        self.take_loaded(ctx, loaded);
+        self.path.clone_from(&name);
+        self.open_bytes(ctx, &name, bytes, crate::BROWSER_MAX_PIXELS);
     }
-    fn take_loaded(&mut self, ctx: &egui::Context, loaded: Result<Raster, String>) {
+    /// Open a file's `bytes`: a picture (Photoshop's included) is decoded;
+    /// a vector file is read and asked about (`vector_ui.rs`).
+    fn open_bytes(&mut self, ctx: &egui::Context, name: &str, bytes: &[u8], max_pixels: u64) {
+        let kind = crate::import::input_kind(bytes, name);
+        if kind.is_vector() {
+            match crate::import::read_vector(kind, bytes) {
+                Ok(imported) if crate::import::has_shapes(&imported) => {
+                    self.offer_vector(name, kind, imported, None);
+                }
+                // No shapes: a picture saved inside a vector file is traced
+                // like any picture.
+                Ok(imported) => match crate::import::picture_in(kind, bytes) {
+                    Ok(Some(picture)) => {
+                        self.take_loaded(ctx, Ok(picture));
+                        if self.raster.is_some() {
+                            let status = self.status.clone();
+                            self.set_status(
+                                StatusKind::Info,
+                                format!(
+                                    "This {} holds a picture, not shapes: the picture is open. {status}",
+                                    kind.label()
+                                ),
+                            );
+                        }
+                    }
+                    Ok(None) => self.take_loaded(
+                        ctx,
+                        Err(format!(
+                            "This {} has no shapes or pictures to trace{}.",
+                            kind.label(),
+                            if imported.skipped.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" (it holds {})", imported.skipped.join(", "))
+                            }
+                        )),
+                    ),
+                    Err(error) => self.take_loaded(ctx, Err(error)),
+                },
+                Err(error) => self.take_loaded(ctx, Err(error)),
+            }
+            return;
+        }
+        // A Photoshop document with shape layers holds vector art too: asked
+        // about like any vector file, its composite traced if tracing is
+        // chosen.
+        if kind == crate::import::InputKind::Photoshop {
+            if let Ok(Some(imported)) = crate::import::photoshop_shapes(bytes) {
+                let picture = crate::decode_raster_up_to(bytes, max_pixels).ok();
+                self.offer_vector(name, kind, imported, picture);
+                return;
+            }
+        }
+        self.take_loaded(ctx, crate::decode_raster_up_to(bytes, max_pixels));
+    }
+    pub(super) fn take_loaded(&mut self, ctx: &egui::Context, loaded: Result<Raster, String>) {
         let loaded = loaded.and_then(crate::fit_for_engine);
         if let Err(error) = &loaded {
-            if self.raster.is_some() {
+            if self.raster.is_some() || self.foreign.is_some() {
                 self.path.clone_from(&self.loaded_path);
                 self.set_status(
                     StatusKind::Error,
@@ -980,6 +1098,7 @@ impl Desktop {
                 return;
             }
         }
+        self.foreign = None;
         self.clear_result();
         self.clear_edits();
         self.forget_edits();
@@ -1411,8 +1530,11 @@ impl Desktop {
         };
         let source = PathBuf::from(&self.loaded_path);
         let target = path.clone();
+        let options = self.export_options();
         self.send_errand(ErrandKind::Write(path.clone()), move || {
-            Fetched::Written(crate::export::write_vector(&source, &target, &svg))
+            Fetched::Written(crate::export::write_vector(
+                &source, &target, &svg, &options,
+            ))
         });
         // Nothing converts while an errand is out, so the clock is free.
         self.started = Stopwatch::start();
@@ -1457,7 +1579,7 @@ impl Desktop {
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_ascii_lowercase();
-                if !matches!(ext.as_str(), "svg" | "pdf" | "eps") {
+                if !Format::ALL.iter().any(|f| f.extension() == ext) {
                     path.set_extension(Format::from_filter_index(filter).extension());
                 }
                 self.save_to(path);
@@ -1497,6 +1619,9 @@ impl Desktop {
     /// 1x is the opened size to the pixel (one ratio for both made 5000 by
     /// 401 save as 5000 by 400; round three of the Opus 5.5 review).
     pub(super) fn unit_size(&self) -> Option<(f32, f32)> {
+        if let Some(foreign) = &self.foreign {
+            return Some(foreign.size);
+        }
         let raster = self.raster.as_ref()?;
         let margin = 2. * self.picture_margin();
         let (w, h) = self.source_size.unwrap_or((raster.width, raster.height));
@@ -1519,6 +1644,10 @@ impl Desktop {
     /// points, which is why it opened a third larger in browsers and looked
     /// small in editors; the app always saves what the footer shows.
     pub(super) fn export_svg(&self) -> Option<Result<String, String>> {
+        if let Some(foreign) = &self.foreign {
+            let (width, height) = self.output_size()?;
+            return Some(crate::resize_svg(&foreign.imported.svg, width, height));
+        }
         let shown = self.shown.as_ref()?;
         let (width, height) = self.output_size()?;
         // Its numbers written short (`crate::export::compact_svg`).
@@ -1534,14 +1663,25 @@ impl Desktop {
                 .map(short),
         )
     }
+    /// The original's export settings as the Save popup has them.
+    pub(super) fn export_options(&self) -> crate::export::ExportOptions {
+        crate::export::ExportOptions {
+            group_by_color: self.save_grouped,
+            stroke_boundaries: self.save_stroke,
+            dxf: self.save_dxf,
+        }
+    }
     /// What the drag file holds when written for what is shown now.
     fn stage_key(&self) -> Option<StageKey> {
-        self.document.as_ref()?;
+        if self.foreign.is_none() {
+            self.document.as_ref()?;
+        }
         Some(StageKey {
             version: self.document_version,
             format: self.save_format,
             size: self.output_size()?,
             stacked: self.save_stacked,
+            options: self.export_options(),
         })
     }
     /// Keep the Save popup's drag file written for what is shown. A PDF or
@@ -1600,8 +1740,11 @@ impl Desktop {
             Ok((path, svg)) => {
                 let (sender, receiver) = mpsc::channel();
                 let (source, target) = (PathBuf::from(&self.loaded_path), path.clone());
+                let options = self.export_options();
                 platform::spawn(move || {
-                    let _ = sender.send(crate::export::write_vector(&source, &target, &svg));
+                    let _ = sender.send(crate::export::write_vector(
+                        &source, &target, &svg, &options,
+                    ));
                 });
                 Staged {
                     key,
@@ -1642,9 +1785,9 @@ impl Desktop {
     pub(super) fn download(&mut self) {
         let name = self.export_name();
         let saved = match self.export_svg() {
-            Some(svg) => {
-                svg.and_then(|svg| crate::export::vector_bytes(self.save_format.kind(), &svg))
-            }
+            Some(svg) => svg.and_then(|svg| {
+                crate::export::vector_bytes(self.save_format.kind(), &svg, &self.export_options())
+            }),
             None => Err("Nothing to save: convert the image first.".into()),
         };
         match saved {

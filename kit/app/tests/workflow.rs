@@ -50,7 +50,7 @@ fn cli_loads_raster_exports_svg_and_refuses_to_overwrite_source() {
         .output()
         .unwrap();
     assert_refused(&rejected, "must be different files");
-    assert!(write_vector(&input, &input, &svg).is_err());
+    assert!(write_vector(&input, &input, &svg, &Default::default()).is_err());
     assert_eq!(std::fs::read(&input).unwrap(), before);
     let invalid = Command::new(env!("CARGO_BIN_EXE_vector-magic-rebuild"))
         .args([
@@ -109,7 +109,7 @@ fn cli_loads_raster_exports_svg_and_refuses_to_overwrite_source() {
     assert_eq!(std::fs::read_to_string(&limited).unwrap(), two);
 }
 
-/// The output's format is checked before the image is even opened: a PNG
+/// The output's format is checked before the image is even opened: a TIFF
 /// target is refused naming the formats, for an input that does not exist.
 #[test]
 fn an_unsupported_output_is_refused_before_any_work() {
@@ -119,12 +119,12 @@ fn an_unsupported_output_is_refused_before_any_work() {
         .args([
             missing.to_str().unwrap(),
             "-o",
-            dir.join("photo.png").to_str().unwrap(),
+            dir.join("photo.tif").to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert_refused(&run, "Choose an SVG, PDF or EPS output filename");
-    assert!(!dir.join("photo.png").exists());
+    assert_refused(&run, "Choose an SVG, PDF, EPS, AI, DXF, EMF or PNG output filename");
+    assert!(!dir.join("photo.tif").exists());
     // A supported one gets as far as loading.
     let run = Command::new(env!("CARGO_BIN_EXE_vector-magic-rebuild"))
         .args([

@@ -8,8 +8,26 @@ use std::time::Duration;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[link(wasm_import_module = "env")]
 extern "C" {
-    /// Milliseconds on the page's monotonic clock.
+    /// Milliseconds since 1970 on the page's monotonic clock
+    /// (`performance.timeOrigin + performance.now()`), so a stopwatch and a
+    /// date both read it.
     fn vm_now_ms() -> f64;
+}
+
+/// Seconds since 1970, UTC: the page's clock in a browser, the system's
+/// elsewhere (0 if the system clock is before 1970).
+pub fn unix_seconds() -> i64 {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs() as i64)
+    }
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    {
+        // SAFETY: the loader supplies the import; it takes and keeps nothing.
+        (unsafe { vm_now_ms() } / 1000.).floor() as i64
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

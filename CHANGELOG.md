@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 (September 24, 2026)
+
+- Photoshop PSD and PSB open and are traced like any picture, as TIFF and TGA do. SVG, PDF,
+  Illustrator AI and EPS files are read as vector artwork: trace them from pixels or convert
+  them as they are, with what was left out (text, images) named.
+- The original Vector Magic's export options: SVG, PDF, EPS, AI, DXF, EMF and PNG; shapes
+  stacked, cut out, or cut out and grouped by color; stroke shape boundaries; DXF as spline
+  curves or as lines.
+- Two previews of a new design, chosen from the Appearance button: Glass (floating
+  translucent panes over soft color, after Apple's Liquid Glass) and Studio (a gray
+  sidebar and toolbar in system blue). Classic stays the default.
+- Light or dark in every look, or Windows' own setting; the browser version follows the
+  site's light and dark switch.
+- Portable: the C runtime is linked in, and the window keeps its settings beside itself
+  when its folder takes files. Both programs are signed by LUNARWERX LLC.
+- Commercial licenses, US$9 a month per seat: the app asks once whether it is for
+  personal or commercial use, and a license key is checked once online, then offline.
+
 ## 0.3.0 (September 24, 2026)
 
 - The browser version is the Windows app itself, compiled to WebAssembly and drawn on a

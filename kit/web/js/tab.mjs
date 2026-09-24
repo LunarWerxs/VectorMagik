@@ -28,7 +28,7 @@ const CONVERT = 18;
 // A fresh app in a 1280 x 860 point tab, from the module's bytes.
 export async function openTab(wasm) {
   const { instance } = await WebAssembly.instantiate(wasm, {
-    env: { vm_now_ms: () => performance.now() },
+    env: { vm_now_ms: () => performance.timeOrigin + performance.now() },
   });
   const e = instance.exports;
   const out = () => new Uint8Array(e.memory.buffer, e.vm_out_ptr(), e.vm_out_len()).slice();

@@ -1,4 +1,5 @@
-//! The desktop window: a lean dark workspace with a settings rail of cards,
+//! The desktop window: a lean workspace (three looks, light or dark:
+//! `look.rs`) with a settings rail of cards,
 //! two comparison cards that pick the orientation giving the largest picture,
 //! synchronized zoom and pan, crisp re-rendering of the vector at any zoom,
 //! live curve simplification with an automatic tolerance, drag-and-drop onto
@@ -36,24 +37,9 @@ use vector_rebuild::sticker::Sticker;
 use vector_rebuild::straighten::StraightenOptions;
 use vector_rebuild::{AdvancedSettings, ImageCategory, Quality};
 
-// Palette, after the design mockups: near-black backdrop, slightly lifted
-// surfaces, teal accent. Everything outside the pictures stays darker than
-// 60/255, which the snapshot test samples.
-const BACKDROP: Color32 = Color32::from_rgb(13, 16, 20);
-const SURFACE: Color32 = Color32::from_rgb(23, 27, 32);
-const SURFACE_HIGH: Color32 = Color32::from_rgb(31, 36, 42);
-const BORDER: Color32 = Color32::from_rgb(44, 50, 58);
-const CHIP: Color32 = Color32::from_rgb(36, 41, 48);
-const FIELD: Color32 = Color32::from_rgb(16, 19, 23);
-const TEXT: Color32 = Color32::from_rgb(225, 227, 228);
-const DIM: Color32 = Color32::from_rgb(160, 168, 174);
-const FAINT: Color32 = Color32::from_rgb(104, 112, 120);
-const ACCENT: Color32 = Color32::from_rgb(79, 209, 197);
-const ACCENT_SOFT: Color32 = Color32::from_rgb(0, 80, 74);
-const ON_ACCENT: Color32 = Color32::from_rgb(0, 44, 40);
-const OK: Color32 = Color32::from_rgb(112, 214, 128);
-const WARN: Color32 = Color32::from_rgb(255, 184, 76);
-const ERR: Color32 = Color32::from_rgb(255, 112, 112);
+// The window's colours come from the palette of the look in force
+// (`look.rs`); these few are drawn over the picture itself and stay the same
+// in every look.
 const NODE: Color32 = Color32::from_rgb(64, 205, 255);
 const NODE_SMOOTH: Color32 = Color32::from_rgb(140, 230, 120);
 const SHAPE_HOVER: Color32 = Color32::from_rgb(255, 255, 255);
@@ -62,8 +48,6 @@ const SHAPE_SELECTED: Color32 = Color32::from_rgb(255, 184, 76);
 const NODE_SHADOW: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 120);
 /// Half the side of a node marker's square, the radius of its circle.
 const NODE_MARKER_RADIUS: f32 = 3.5;
-const CHECKER_LIGHT: Color32 = Color32::from_gray(52);
-const CHECKER_DARK: Color32 = Color32::from_gray(40);
 
 /// How far zoom goes, as display scales (screen pixels per source pixel):
 /// out to a quarter of fit or of 1:1, whichever is smaller, and in to 32
@@ -172,7 +156,8 @@ pub mod icon {
     pub const STICKER: &str = "\u{2B23}";
     pub const OPEN_CARD: &str = "\u{25BC}";
     pub const CLOSED_CARD: &str = "\u{25BA}";
-    pub const ALL: [&str; 26] = [
+    pub const APPEARANCE: &str = "\u{1F313}";
+    pub const ALL: [&str; 27] = [
         OPEN,
         LOAD,
         CONVERT,
@@ -199,6 +184,7 @@ pub mod icon {
         STICKER,
         OPEN_CARD,
         CLOSED_CARD,
+        APPEARANCE,
     ];
 }
 
@@ -350,20 +336,38 @@ fn find_shape(islands: &[Island], shape: &Removal) -> Option<usize> {
         .filter(|&i| islands[i].color.eq_ignore_ascii_case(&shape.color))
 }
 
-/// The file formats Save offers; chosen before any dialog opens.
+/// The file formats Save offers; chosen before any dialog opens. The
+/// original offered EPS, SVG, PDF, AI, EMF and DXF; PNG is the drawing as
+/// pixels.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Format {
     Svg,
     Pdf,
     Eps,
+    Ai,
+    Dxf,
+    Emf,
+    Png,
 }
 impl Format {
-    pub const ALL: [Format; 3] = [Format::Svg, Format::Pdf, Format::Eps];
+    pub const ALL: [Format; 7] = [
+        Format::Svg,
+        Format::Pdf,
+        Format::Eps,
+        Format::Ai,
+        Format::Dxf,
+        Format::Emf,
+        Format::Png,
+    ];
     fn label(self) -> &'static str {
         match self {
             Format::Svg => "SVG",
             Format::Pdf => "PDF",
             Format::Eps => "EPS",
+            Format::Ai => "AI",
+            Format::Dxf => "DXF",
+            Format::Emf => "EMF",
+            Format::Png => "PNG",
         }
     }
     fn extension(self) -> &'static str {
@@ -371,6 +375,10 @@ impl Format {
             Format::Svg => "svg",
             Format::Pdf => "pdf",
             Format::Eps => "eps",
+            Format::Ai => "ai",
+            Format::Dxf => "dxf",
+            Format::Emf => "emf",
+            Format::Png => "png",
         }
     }
     fn hint(self) -> &'static str {
@@ -380,6 +388,16 @@ impl Format {
             Format::Eps => {
                 "PostScript on white. Partial transparency is refused rather than rasterized."
             }
+            Format::Ai => {
+                "Adobe Illustrator: a PDF-compatible file every current Illustrator opens."
+            }
+            Format::Dxf => {
+                "AutoCAD and cutting machines: the outlines, as curves or as lines (below)."
+            }
+            Format::Emf => {
+                "Windows metafile, for Office and other Windows programs. No partial transparency."
+            }
+            Format::Png => "The drawing as pixels, at the size above, on transparency.",
         }
     }
     /// The position in the save dialog's filter list.
@@ -388,24 +406,26 @@ impl Format {
         allow(dead_code, reason = "only the Windows system dialogs use it")
     )]
     fn filter_index(self) -> u32 {
-        match self {
-            Format::Svg => 1,
-            Format::Pdf => 2,
-            Format::Eps => 3,
-        }
+        Format::ALL
+            .iter()
+            .position(|f| *f == self)
+            .map_or(1, |i| i as u32 + 1)
     }
     fn from_filter_index(index: u32) -> Format {
-        match index {
-            2 => Format::Pdf,
-            3 => Format::Eps,
-            _ => Format::Svg,
-        }
+        (index as usize)
+            .checked_sub(1)
+            .and_then(|i| Format::ALL.get(i).copied())
+            .unwrap_or(Format::Svg)
     }
     fn kind(self) -> crate::export::OutputKind {
         match self {
             Format::Svg => crate::export::OutputKind::Svg,
             Format::Pdf => crate::export::OutputKind::Pdf,
             Format::Eps => crate::export::OutputKind::Eps,
+            Format::Ai => crate::export::OutputKind::Ai,
+            Format::Dxf => crate::export::OutputKind::Dxf,
+            Format::Emf => crate::export::OutputKind::Emf,
+            Format::Png => crate::export::OutputKind::Png,
         }
     }
     fn mime(self) -> &'static str {
@@ -413,6 +433,10 @@ impl Format {
             Format::Svg => "image/svg+xml",
             Format::Pdf => "application/pdf",
             Format::Eps => "application/postscript",
+            Format::Ai => "application/illustrator",
+            Format::Dxf => "image/vnd.dxf",
+            Format::Emf => "image/emf",
+            Format::Png => "image/png",
         }
     }
 }
@@ -442,6 +466,33 @@ pub enum Overlay {
     NodeMenu,
     /// Shape editing on, the shape at the centre selected and its menu open.
     Shapes,
+    /// The first-run question: personal or commercial use.
+    Licence,
+    /// The Appearance popup: the look, light or dark.
+    Appearance,
+}
+
+/// How the person said they use VectorMagik when the app first asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LicenceUse {
+    Personal,
+    Commercial,
+}
+
+impl LicenceUse {
+    fn word(self) -> &'static str {
+        match self {
+            LicenceUse::Personal => "personal",
+            LicenceUse::Commercial => "commercial",
+        }
+    }
+    fn from_word(word: &str) -> Option<Self> {
+        match word.trim() {
+            "personal" => Some(LicenceUse::Personal),
+            "commercial" => Some(LicenceUse::Commercial),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -493,6 +544,7 @@ struct StageKey {
     format: Format,
     size: (u32, u32),
     stacked: bool,
+    options: crate::export::ExportOptions,
 }
 /// Whether the staged file can be dragged out yet.
 #[cfg_attr(
@@ -827,6 +879,44 @@ pub struct Desktop {
     prefs: Option<PathBuf>,
     /// The preferences as last written, so they are written when changed.
     prefs_saved: (bool, bool),
+    /// The commercial licence (`crate::licence`): the key and its latest
+    /// certificate, kept with the preferences, and as last saved.
+    licence: crate::licence::Stored,
+    licence_saved: crate::licence::Stored,
+    /// What the Licence card's key field holds.
+    licence_input: String,
+    /// A redeem on its way: the reply, the key presented, and whether it was
+    /// typed (a refusal then leaves the stored licence alone) or the stored
+    /// key renewing its certificate (a refusal then ends it).
+    licence_reply: Option<(Receiver<platform::Reply>, String, bool)>,
+    /// The card's last word about the licence: a refusal, no connection.
+    licence_note: Option<String>,
+    /// Whether this run has offered the stored key for renewal yet.
+    licence_renewed: bool,
+    /// The answer to the first-run question, once given.
+    licence_use: Option<LicenceUse>,
+    /// Whether the first-run question is on screen (`ask_licence_if_new`).
+    ask_licence: bool,
+    /// The question's key field is open: commercial use was chosen.
+    prompt_key: bool,
+    /// The checkout was opened from the question, which then says so.
+    licence_opened: bool,
+    /// The design and the light or dark the person chose.
+    look: Look,
+    theme: ThemeChoice,
+    /// The look, theme and answer as last written with the preferences.
+    appearance_saved: (Look, ThemeChoice, Option<LicenceUse>),
+    /// The look and darkness the style was last built for.
+    applied: Option<(Look, bool)>,
+    appearance_open: bool,
+    /// Where the Appearance button was drawn, so its popup hangs below it.
+    appearance_anchor: egui::Rect,
+    /// A vector file just opened, waiting for "trace it or convert it"
+    /// (`vector_ui.rs`).
+    vector_offer: Option<vector_ui::VectorOffer>,
+    /// A vector file converted as it is, shown and saved in place of a
+    /// traced document.
+    foreign: Option<vector_ui::Foreign>,
     deriver: Option<(Sender<DeriveRequest>, Receiver<DeriveResult>)>,
     derive_serial: u64,
     /// The serial of the latest request not yet answered, if any.
@@ -844,7 +934,7 @@ pub struct Desktop {
     view: View,
     overlay_vector: bool,
     /// Which rail cards are folded to their heading.
-    collapsed: [bool; 6],
+    collapsed: [bool; 7],
     /// The Advanced card: the original's three sliders and its corner
     /// detection instead of the preset, applied at the next conversion.
     advanced_on: bool,
@@ -906,6 +996,12 @@ pub struct Desktop {
     /// Save the stacked drawing (the default, as shown) or the shapes cut
     /// out exactly, for cutting machines.
     save_stacked: bool,
+    /// Cut-out shapes grouped by colour (the original's default) or not.
+    save_grouped: bool,
+    /// The original's "Stroke shape boundaries".
+    save_stroke: bool,
+    /// How a DXF writes curves.
+    save_dxf: crate::export::DxfMode,
     save_open: bool,
     /// Where the Save button was drawn, so its popup hangs below it.
     save_anchor: egui::Rect,
@@ -922,14 +1018,19 @@ mod cards;
 mod chrome;
 mod edits;
 mod headless;
+mod licence_ui;
+mod look;
 pub mod platform;
 mod prefs;
 mod state;
 #[cfg(test)]
 mod tests;
+mod vector_ui;
 mod widgets;
 mod workspace;
 
+use look::{faded, pal};
+pub use look::{Look, ThemeChoice};
 use widgets::*;
 
 #[cfg(feature = "desktop")]

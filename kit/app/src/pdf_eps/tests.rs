@@ -87,6 +87,71 @@ fn eps_fills_then_strokes_one_path_and_starts_on_white() {
     );
 }
 
+/// 64-bit FNV-1a of `bytes`: a fingerprint of a whole file for the test
+/// below, which needs no cryptographic strength.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// A hand-written drawing that goes through every branch of the reader and
+/// both writers: a translated translucent group, a rectangle, relative,
+/// implicit, smooth and quadratic path data, fill and stroke together,
+/// stroke alone and both fill rules.
+const EVERY_BRANCH: &str = "<svg width=\"120\" height=\"90\" viewBox=\"-5 -5 160 120\"><g transform=\"translate(3 4)\" opacity=\"0.8\" fill=\"#3366cc\"><rect x=\"1\" y=\"2\" width=\"30\" height=\"20\" /><path fill-rule=\"evenodd\" d=\"m10,10 20 0v5h-20zM0 0Q10 0 10 10T20 20\" /></g><path fill=\"#ff8800\" stroke=\"#000\" stroke-width=\"1.5\" stroke-linejoin=\"bevel\" stroke-linecap=\"round\" d=\"M 40 40 C 50 30 60 30 70 40 S 90 50 100 40 L 100 80 H 40 Z\" /><path fill=\"none\" stroke=\"#00ff00\" fill-opacity=\"0.5\" d=\"M 5 100 L 150 100\" /></svg>";
+
+/// The PDF and EPS of the drawings above and three frozen reference
+/// documents, fingerprinted before the reader was changed to keep each
+/// path's segments (September 24, 2026): the writers must not move a byte.
+#[test]
+fn pdf_and_eps_bytes_are_unchanged_by_the_structured_reader() {
+    let references = [
+        (
+            "logo-with-blending-small-high",
+            include_str!("../../../fixtures/reference/logo-with-blending-small-high.svg"),
+        ),
+        (
+            "coffee-low",
+            include_str!("../../../fixtures/reference/coffee-low.svg"),
+        ),
+        (
+            "astronaut-low",
+            include_str!("../../../fixtures/reference/astronaut-low.svg"),
+        ),
+    ];
+    let mut seen = Vec::new();
+    for (name, svg) in references {
+        seen.push((name, "pdf", fingerprint(&to_pdf(svg).unwrap())));
+        seen.push((name, "eps", fingerprint(&to_eps(svg).unwrap())));
+    }
+    seen.push((
+        "every-branch",
+        "pdf",
+        fingerprint(&to_pdf(EVERY_BRANCH).unwrap()),
+    ));
+    // EPS refuses the translucent group; the same drawing opaque.
+    let opaque = EVERY_BRANCH
+        .replace(" opacity=\"0.8\"", "")
+        .replace(" fill-opacity=\"0.5\"", "");
+    seen.push((
+        "every-branch",
+        "eps",
+        fingerprint(&to_eps(&opaque).unwrap()),
+    ));
+    let expected: [(&str, &str, u64); 8] = [
+        ("logo-with-blending-small-high", "pdf", 7387381173290135551),
+        ("logo-with-blending-small-high", "eps", 10622153357145488776),
+        ("coffee-low", "pdf", 10339105553459247774),
+        ("coffee-low", "eps", 8569045390153395527),
+        ("astronaut-low", "pdf", 2692276451641380159),
+        ("astronaut-low", "eps", 17390289305250369645),
+        ("every-branch", "pdf", 303380013723139878),
+        ("every-branch", "eps", 3328680109805976187),
+    ];
+    assert_eq!(seen, expected);
+}
+
 #[test]
 fn anything_but_the_app_s_own_shapes_is_refused() {
     for svg in [

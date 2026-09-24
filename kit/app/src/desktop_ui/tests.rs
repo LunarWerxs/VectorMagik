@@ -664,10 +664,10 @@ fn auto_tolerance_straightening_overlay_and_dropping_a_colour_work_together() {
     app.set_view(View::Overlay, false);
     run_frame(&ctx, &mut app);
     app.set_view(View::Overlay, true);
-    app.collapsed = [true; 6];
+    app.collapsed = [true; 7];
     app.shapes_mode = true;
     run_frame(&ctx, &mut app);
-    app.collapsed = [false; 6];
+    app.collapsed = [false; 7];
     app.set_view(View::SideBySide, true);
     // Dropping the least used colour recolours its shapes to the nearest
     // other colour and converts again with one colour fewer.
@@ -1501,6 +1501,20 @@ fn the_open_dialog_lists_every_format_the_loader_decodes() {
     listed.sort_unstable();
     decoded.sort_unstable();
     assert_eq!(listed, decoded);
+    // The other files the dialog offers are ones the app reads itself.
+    for pattern in IMPORT_FILTER.split(';') {
+        let extension = pattern.strip_prefix("*.").unwrap();
+        let kind = match extension {
+            "psd" | "psb" => crate::import::InputKind::Photoshop,
+            "svg" => crate::import::InputKind::Svg,
+            "pdf" | "ai" => crate::import::InputKind::Pdf,
+            _ => crate::import::InputKind::PostScript,
+        };
+        assert!(
+            kind == crate::import::InputKind::Photoshop || kind.is_vector(),
+            "{extension}"
+        );
+    }
 }
 
 /// One frame with these raw events (keys with their modifiers, releases).
@@ -1793,8 +1807,37 @@ fn hold_shows_the_other_picture_only_while_it_is_held() {
 
 #[test]
 fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
-    let text = prefs::write_prefs((true, false));
+    let classic = (Look::Classic, ThemeChoice::Dark, None);
+    let text = prefs::write_prefs((true, false), &Default::default(), classic);
     assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
+    assert!(!text.contains("licence"));
+    assert_eq!(prefs::parse_appearance(&text), classic);
+    // The look, light or dark and the first-run answer ride along; words
+    // not understood keep the defaults.
+    let chosen = (
+        Look::Glass,
+        ThemeChoice::System,
+        Some(LicenceUse::Commercial),
+    );
+    let text = prefs::write_prefs((true, false), &Default::default(), chosen);
+    assert_eq!(prefs::parse_appearance(&text), chosen);
+    assert_eq!(
+        prefs::parse_appearance("look=paisley\ntheme=sepia\nlicence_use=maybe\n"),
+        classic
+    );
+    // A licence rides along; a key that is not shaped like one is dropped,
+    // and its certificate with it.
+    let licence = crate::licence::Stored {
+        key: "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into(),
+        certificate: "payload.signature".into(),
+    };
+    let text = prefs::write_prefs((true, false), &licence, classic);
+    assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
+    assert_eq!(prefs::parse_licence(&text), licence);
+    assert_eq!(
+        prefs::parse_licence("licence_key=nonsense\nlicence_certificate=a.b\n"),
+        crate::licence::Stored::default()
+    );
     assert_eq!(
         prefs::parse_prefs(
             "junk\nhold_compare=maybe\nauto_convert=off\nother=on\n",
@@ -1995,4 +2038,181 @@ fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
     settle(&ctx, &mut app);
     assert!(app.deleted_nodes.is_empty());
     assert_eq!(svg(&app), start);
+}
+
+#[test]
+fn a_refused_typed_key_stays_out_and_a_refused_stored_one_ends_the_licence() {
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    // Nothing stored: nothing is asked of the network.
+    app.licence_tick(&ctx);
+    assert!(app.licence_reply.is_none() && app.licence_renewed);
+    let key = "esk_ABCDE-FGHIJ-KLMNO-PQRS1".to_owned();
+    let refused = r#"{"error":"unknown_or_expired_key","message":"That key does not exist, has expired, or has been revoked."}"#;
+    app.take_redeem(key.clone(), true, 404, refused);
+    assert_eq!(app.licence, crate::licence::Stored::default());
+    assert!(app
+        .licence_note
+        .as_deref()
+        .unwrap()
+        .contains("does not exist"));
+    let stored = crate::licence::Stored {
+        key: key.clone(),
+        certificate: "a.b".into(),
+    };
+    app.licence = stored.clone();
+    app.take_redeem(key.clone(), false, 404, refused);
+    assert_eq!(app.licence, crate::licence::Stored::default());
+    assert!(app
+        .licence_note
+        .as_deref()
+        .unwrap()
+        .starts_with("The license has ended"));
+    // No connection keeps what is stored.
+    app.licence = stored.clone();
+    app.take_redeem(key, false, 0, "");
+    assert_eq!(app.licence, stored);
+    // The card draws in each state, folded and open.
+    run_frame(&ctx, &mut app);
+    app.collapsed[6] = false;
+    run_frame(&ctx, &mut app);
+    app.licence = crate::licence::Stored::default();
+    run_frame(&ctx, &mut app);
+}
+
+#[test]
+fn every_look_builds_its_style_light_and_dark_and_a_frame_draws_it() {
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    for look in Look::ALL {
+        for (theme, dark) in [(ThemeChoice::Light, false), (ThemeChoice::Dark, true)] {
+            app.set_appearance(look, theme);
+            frame_with(&ctx, &mut app, &[], &[]);
+            let style = ctx.style();
+            assert_eq!(style.visuals.dark_mode, dark, "{look:?} {theme:?}");
+            assert_eq!(pal().look, look);
+            assert_eq!(style.visuals.panel_fill, pal().backdrop);
+            assert_eq!(app.applied, Some((look, dark)));
+        }
+    }
+    // The popup that chooses them draws in every look.
+    app.open_overlay(Overlay::Appearance, egui::pos2(600., 300.));
+    frame_with(&ctx, &mut app, &[], &[]);
+    assert!(app.appearance_open);
+}
+
+#[test]
+fn the_first_run_question_is_asked_once_and_an_answer_or_a_licence_ends_it() {
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    // Tests and snapshots start without it.
+    assert!(!app.ask_licence);
+    app.ask_licence_if_new();
+    assert!(app.ask_licence);
+    frame_with(&ctx, &mut app, &[], &[]);
+    // The Commercial tile opens the key field; the question stays.
+    app.prompt_key = true;
+    frame_with(&ctx, &mut app, &[], &[]);
+    assert!(app.ask_licence);
+    // An answer kept in the preferences, or a stored licence, means it is
+    // not asked again.
+    app.licence_use = Some(LicenceUse::Personal);
+    app.ask_licence_if_new();
+    assert!(!app.ask_licence);
+    app.licence_use = None;
+    app.licence.key = "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into();
+    app.ask_licence_if_new();
+    assert!(!app.ask_licence);
+    // A key Pay refuses leaves the question open with the reason shown.
+    app.licence = Default::default();
+    app.ask_licence_if_new();
+    app.take_redeem(
+        "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into(),
+        true,
+        404,
+        r#"{"ok":false,"error":"unknown_or_expired_key","message":"That key is not known."}"#,
+    );
+    assert!(app.ask_licence && app.licence_note.is_some());
+}
+
+#[test]
+fn a_portable_copy_keeps_its_settings_beside_itself() {
+    let folder = scratch("portable");
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = prefs::portable_prefs(&folder);
+    assert_eq!(path, Some(folder.join(prefs::PORTABLE_PREFS)));
+    // The check that the folder takes files leaves nothing behind.
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    app.load_prefs(path.clone().unwrap());
+    app.look = Look::Studio;
+    app.save_prefs();
+    let mut again = Desktop::blank(&ctx);
+    again.load_prefs(path.unwrap());
+    let _ = std::fs::remove_dir_all(&folder);
+    assert_eq!(again.look, Look::Studio);
+}
+
+#[test]
+fn a_vector_file_is_asked_about_then_converted_as_it_is_or_traced() {
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="20" height="20" fill="#ff0000"/><rect x="20" width="20" height="20" fill="#0000ff"/></svg>"##;
+    app.load_bytes(&ctx, "logo.svg".into(), svg);
+    let offer = app
+        .vector_offer
+        .as_ref()
+        .expect("a vector file is asked about");
+    assert_eq!(offer.kind, crate::import::InputKind::Svg);
+    assert!(app.raster.is_none());
+    frame_with(&ctx, &mut app, &[], &[]);
+    // Converted: its shapes kept, shown, and saved at its own size (40 by
+    // 20 CSS pixels) through the same Save path.
+    app.convert_offer(&ctx);
+    assert!(app.vector_offer.is_none() && app.raster.is_none() && app.document.is_none());
+    assert!(app.foreign.is_some());
+    assert_eq!(app.output_size(), Some((40, 20)));
+    let saved = app.export_svg().unwrap().unwrap();
+    assert!(saved.contains("fill=\"#ff0000\"") && saved.contains("fill=\"#0000ff\""));
+    assert!(saved.contains("width=\"40\"") && saved.contains("height=\"20\""));
+    assert!(crate::pdf_eps::to_pdf(&saved).unwrap().starts_with(b"%PDF"));
+    frame_with(&ctx, &mut app, &[], &[]);
+    // Traced instead: drawn at the chosen side and opened as a picture.
+    app.load_bytes(&ctx, "logo.svg".into(), svg);
+    app.trace_offer(&ctx);
+    assert!(app.foreign.is_none());
+    let raster = app.raster.as_ref().expect("traced from pixels");
+    assert_eq!((raster.width, raster.height), (2000, 1000));
+    // Cancel leaves what was open alone.
+    app.load_bytes(&ctx, "other.svg".into(), svg);
+    app.vector_offer = None;
+    assert!(app.raster.is_some());
+}
+
+#[test]
+fn a_photoshop_document_with_shape_layers_is_asked_about_and_traced_from_its_composite() {
+    let ctx = egui::Context::default();
+    let mut app = Desktop::blank(&ctx);
+    let bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/samples/vector-mojo-sample.psd"),
+    )
+    .unwrap();
+    app.load_bytes(&ctx, "vector-mojo-sample.psd".into(), &bytes);
+    let offer = app
+        .vector_offer
+        .as_ref()
+        .expect("shape layers are asked about");
+    assert_eq!(offer.kind, crate::import::InputKind::Photoshop);
+    assert!(offer.imported.svg.matches("<path").count() >= 8);
+    let picture = offer
+        .picture
+        .as_ref()
+        .expect("its composite is the picture to trace");
+    let (width, height) = (picture.width, picture.height);
+    frame_with(&ctx, &mut app, &[], &[]);
+    app.trace_offer(&ctx);
+    let raster = app.raster.as_ref().expect("traced from its composite");
+    assert_eq!((raster.width, raster.height), (width, height));
 }

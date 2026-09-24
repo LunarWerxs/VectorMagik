@@ -32,7 +32,9 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, or t
 - ✏️ **Finish by hand.** Show the nodes, round a corner, drag or delete a node, delete or merge shapes. Ctrl+Z undoes anything.
 - 🌐 **The whole app in your browser, too.** The Windows app itself, compiled to WebAssembly: your picture never leaves your computer.
 - 🔒 **Offline.** No account, no upload, no telemetry.
-- 🧾 **Free** for personal use under PolyForm Noncommercial.
+- 🪟 **Portable and signed.** One folder, nothing to install; settings stay beside the app. Signed by LUNARWERX LLC.
+- 🎨 **Three looks, light or dark.** Classic, or preview Glass and Studio, a new design after Apple's.
+- 🧾 **Free** for personal use under PolyForm Noncommercial; [commercial licenses](https://vectormagik.lunarwerx.com/#license) are US$9 a month per seat.
 
 <div align="center">
 
@@ -97,7 +99,7 @@ VectorMagik is not affiliated with, endorsed by or connected to Vector Magic, In
 
 ## Licence
 
-Free for personal and other noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use needs a licence from LunarWerx: [open an issue](https://github.com/LunarWerxs/VectorMagik/issues/new) to ask.
+Free for personal and other noncommercial use under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use needs a license, US$9 a month per seat: [buy one on the site](https://vectormagik.lunarwerx.com/#license) and paste its key into the app's License card.
 
 Required Notice: Copyright (c) 2026 LunarWerx.
 

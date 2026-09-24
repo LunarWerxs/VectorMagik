@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use vector_magic_rebuild::engine::{self, Options as EngineOptions};
+use vector_magic_rebuild::export::{DxfMode, ExportOptions};
 use vector_rebuild::{ImageCategory, Quality};
 
 fn run() -> Result<(), String> {
@@ -9,7 +10,7 @@ fn run() -> Result<(), String> {
         .collect();
     if args.is_empty() || args[0] == "--help" {
         println!("Vector Magic rebuild: the recovered engine, in Rust alone
-Usage: vector-magic-rebuild INPUT -o OUTPUT.svg|OUTPUT.pdf|OUTPUT.eps [--category blended|unblended|photo|auto] [--quality high|medium|low|auto]
+Usage: vector-magic-rebuild INPUT -o OUTPUT.svg|.pdf|.eps|.ai|.dxf|.emf|.png [--category blended|unblended|photo|auto] [--quality high|medium|low|auto]
 PNG, JPEG, GIF, BMP and PNM are supported. Default: blended artwork, high source quality; auto takes the image type or the source quality the desktop's Auto detects in the prepared image (both auto are the desktop's Auto settings).
 Opaque photographs use seam overlap; --photo-seams native keeps the engine's own output.
 --defaults improved|original: at high quality, photographs trace at the original's advanced-mode detail ceiling (12,6,6) and blended artwork at its advanced mode with segmentation detail 11 and smoothness 3 (11,3,6), both measured better than the basic presets (improved, the default); original keeps the original's basic presets byte for byte.
@@ -23,6 +24,8 @@ No original binary, host process or extracted engine is needed; nothing is downl
 --stack on writes every region joined with the neighbours painted after it, so each anti-aliased edge blends over a solid colour and no background shows between two colours (the picture is the same; export-time, off by default; the desktop shows and saves stacked).
 --primitives on draws every closed outline that the source's pixels show to be a circle, an ellipse, a rectangle or a rounded rectangle as that shape, when it explains those pixels at least as well as the traced outline (artwork only; runs after straightening; owned post-processing, off by default; the desktop has it on).
 --straighten 0.8 draws curve pieces that bow at most that many source pixels (or 3% of their length per pixel of it) as straight lines and snaps lines within three degrees of horizontal or vertical, moving no node more than a pixel (owned post-processing, off by default; the desktop has it on); --straighten auto takes the bow the desktop's Auto does for the kind of picture traced: 0.2 on anti-aliased artwork, 0.65 on aliased artwork, 1.2 on photographs.
+--vector convert|trace[:SIDE] says what to do with a vector input (SVG, PDF, Illustrator AI, EPS): convert saves its own shapes as they are in the output's format; trace draws it SIDE pixels on its longer side (2000 unless given, up to 4096) and traces that like any picture. Without it a vector input is refused with both choices named. Photoshop PSD and PSB inputs are traced like any picture.
+The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Illustrator file), DXF, EMF (Windows' Enhanced Metafile; like EPS it refuses partial transparency) or PNG (the drawing as pixels at its declared size, 96 per inch; builds with the render or desktop feature). The export settings are the original's: --no-color-groups places shapes in cut-outs without grouping them by colour; --stroke-boundaries strokes every filled shape with its own colour at width 0.09375, which hides hairline seams; --dxf splines|fine|coarse writes a DXF's curves as spline curves (R2000, the default) or as lines within 0.05 pt (fine) or 0.5 pt (coarse) of them (R12).
 --sticker on|BORDER,RIM[,shadow] paints a die-cut sticker outline under the shapes (a black border, a white rim, an optional shadow; on sizes them for the image) and grows the canvas to fit; --cut-background on first removes the background shapes of an opaque image so the outline hugs the object (both owned post-processing).");
         return Ok(());
     }
@@ -31,17 +34,121 @@ No original binary, host process or extracted engine is needed; nothing is downl
     // engine's limits and a 1 px side doubled, the drawing then declared at
     // the picture's own size (the defect sweep of September 23, 2026: the
     // CLI refused a 6000 x 4000 photograph the desktop opens).
-    let raster = vector_magic_rebuild::load_raster_up_to(
-        &cli.input,
-        vector_magic_rebuild::DESKTOP_MAX_PIXELS,
-    )?;
+    let bytes = std::fs::read(&cli.input).map_err(|e| format!("{}: {e}", cli.input.display()))?;
+    let kind = vector_magic_rebuild::import::input_kind(&bytes, &cli.input.to_string_lossy());
+    // A Photoshop document's shape layers, saved as they are when asked
+    // (--vector convert); otherwise the document is traced like a picture.
+    if kind == vector_magic_rebuild::import::InputKind::Photoshop
+        && cli.vector == VectorArg::Convert
+    {
+        let imported =
+            vector_magic_rebuild::import::photoshop_shapes(&bytes)?.ok_or_else(|| {
+                format!(
+                    "{} has no shape layers to convert: trace it without --vector convert.",
+                    cli.input.display()
+                )
+            })?;
+        for note in &imported.skipped {
+            eprintln!("Left out: {note}");
+        }
+        vector_magic_rebuild::export::write_vector(
+            &cli.input,
+            &cli.output,
+            &imported.svg,
+            &cli.export,
+        )?;
+        println!(
+            "{{\"converted\":\"{}\",\"shapes\":{},\"pages\":1,\"left_out\":{}}}",
+            kind.label(),
+            imported.svg.matches("<path").count(),
+            imported.skipped.len()
+        );
+        return Ok(());
+    }
+    let raster = if kind.is_vector() {
+        // A vector file: converted as it is, or drawn as a picture and
+        // traced, as the window asks.
+        let imported = vector_magic_rebuild::import::read_vector(kind, &bytes)?;
+        for note in &imported.skipped {
+            eprintln!("Left out: {note}");
+        }
+        let shapes = imported.svg.matches("<path").count();
+        if shapes == 0 {
+            // No shapes: a picture saved inside the file is traced like any.
+            if let Some(picture) = vector_magic_rebuild::import::picture_in(kind, &bytes)? {
+                if cli.vector == VectorArg::Convert {
+                    return Err(format!(
+                        "{} holds a picture, not shapes: there is nothing to convert. Trace it \
+                         with --vector trace.",
+                        cli.input.display()
+                    ));
+                }
+                eprintln!(
+                    "{} holds a picture, not shapes: tracing the picture.",
+                    cli.input.display()
+                );
+                let (raster, loaded_as) = vector_magic_rebuild::fit_for_engine(picture)?;
+                return run_engine(cli, raster, loaded_as);
+            }
+        }
+        match cli.vector {
+            VectorArg::Ask => {
+                return Err(format!(
+                    "{} is {} vector artwork with {shapes} shapes. Add --vector convert to save \
+                     its shapes as they are in the output's format, or --vector trace[:SIDE] to \
+                     draw it SIDE pixels on its longer side (2000 unless given) and trace that.",
+                    cli.input.display(),
+                    kind.label()
+                ));
+            }
+            VectorArg::Convert => {
+                vector_magic_rebuild::export::write_vector(
+                    &cli.input,
+                    &cli.output,
+                    &imported.svg,
+                    &cli.export,
+                )?;
+                println!(
+                    "{{\"converted\":\"{}\",\"shapes\":{shapes},\"pages\":{},\"left_out\":{}}}",
+                    kind.label(),
+                    imported.pages,
+                    imported.skipped.len()
+                );
+                return Ok(());
+            }
+            #[cfg(feature = "render")]
+            VectorArg::Trace(side) => vector_magic_rebuild::import::rasterize(&imported, side)?,
+            #[cfg(not(feature = "render"))]
+            VectorArg::Trace(_) => {
+                return Err(
+                    "--vector trace draws the file and needs a build with the render (or \
+                     desktop) feature"
+                        .into(),
+                );
+            }
+        }
+    } else {
+        vector_magic_rebuild::decode_raster_up_to(&bytes, vector_magic_rebuild::DESKTOP_MAX_PIXELS)?
+    };
     let (raster, loaded_as) = vector_magic_rebuild::fit_for_engine(raster)?;
     run_engine(cli, raster, loaded_as)
+}
+
+/// What to do with a vector file given as the input (`--vector`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VectorArg {
+    /// Nothing said: refuse with both choices named.
+    Ask,
+    /// Save its shapes as they are in the output's format.
+    Convert,
+    /// Draw it this many pixels on its longer side and trace that.
+    Trace(u32),
 }
 
 /// Everything the command line said, parsed once.
 struct Cli {
     input: PathBuf,
+    vector: VectorArg,
     output: PathBuf,
     native: EngineOptions,
     /// `--category auto` / `--quality auto`: detected in the prepared image.
@@ -59,6 +166,8 @@ struct Cli {
     prep: vector_magic_rebuild::Preparation,
     sticker: StickerArg,
     cut_background: bool,
+    /// `--no-color-groups`, `--stroke-boundaries` and `--dxf`.
+    export: ExportOptions,
 }
 
 /// The arguments after the program name, `args[0]` being the input.
@@ -77,9 +186,25 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
     let mut prep = vector_magic_rebuild::Preparation::default();
     let mut sticker = StickerArg::Off;
     let mut cut_background = false;
+    let mut vector = VectorArg::Ask;
+    let mut export = ExportOptions::default();
     let mut i = 1;
     while i < args.len() {
         let key = &args[i];
+        // The export settings that take no value.
+        match key.as_str() {
+            "--no-color-groups" => {
+                export.group_by_color = false;
+                i += 1;
+                continue;
+            }
+            "--stroke-boundaries" => {
+                export.stroke_boundaries = true;
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
         let value = args
             .get(i + 1)
             .ok_or_else(|| format!("Missing value for {key}"))?;
@@ -190,6 +315,20 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
                     _ => return Err("Cut background must be on or off".into()),
                 }
             }
+            "--vector" => {
+                const TAKES: &str = "--vector takes convert, trace or trace:SIDE (16 to 4096 px)";
+                vector = match value.split_once(':') {
+                    None if value == "convert" => VectorArg::Convert,
+                    None if value == "trace" => VectorArg::Trace(2000),
+                    Some(("trace", side)) => VectorArg::Trace(
+                        side.parse()
+                            .ok()
+                            .filter(|s| (16..=4096).contains(s))
+                            .ok_or(TAKES)?,
+                    ),
+                    _ => return Err(TAKES.into()),
+                }
+            }
             "--colors" => {
                 prep.colors = Some(
                     value
@@ -210,6 +349,14 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
                     .ok_or("--set values must be finite numbers")?;
                 overrides.push((name.to_owned(), values));
             }
+            "--dxf" => {
+                export.dxf = match value.as_str() {
+                    "splines" => DxfMode::Splines,
+                    "fine" => DxfMode::FineLines,
+                    "coarse" => DxfMode::CoarseLines,
+                    _ => return Err("DXF curves must be splines, fine or coarse".into()),
+                }
+            }
             "--background" => {
                 prep.background = Some(
                     vector_magic_rebuild::parse_rgb(value)
@@ -227,7 +374,8 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
             engine::parse_advanced(spec, native.category)?;
         }
     }
-    let output = output.ok_or("Specify an output with -o OUTPUT.svg|OUTPUT.pdf|OUTPUT.eps")?;
+    let output =
+        output.ok_or("Specify an output with -o OUTPUT.svg|.pdf|.eps|.ai|.dxf|.emf|.png")?;
     if vector_magic_rebuild::same_file(&input, &output) {
         return Err("Input and output must be different files".into());
     }
@@ -235,6 +383,7 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
     vector_magic_rebuild::export::output_kind(&output)?;
     Ok(Cli {
         input,
+        vector,
         output,
         native,
         auto_category,
@@ -249,6 +398,7 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
         prep,
         sticker,
         cut_background,
+        export,
     })
 }
 
@@ -260,6 +410,7 @@ fn run_engine(
 ) -> Result<(), String> {
     let Cli {
         input,
+        vector: _,
         output,
         mut native,
         auto_category,
@@ -274,6 +425,7 @@ fn run_engine(
         prep,
         sticker,
         cut_background,
+        export,
     } = cli;
     let raster = if prep.is_identity() {
         raster
@@ -364,7 +516,7 @@ fn run_engine(
     } else {
         svg
     };
-    vector_magic_rebuild::export::write_vector(&input, &output, &svg)?;
+    vector_magic_rebuild::export::write_vector(&input, &output, &svg, &export)?;
     print!("{}", doc.statistics_json());
     if let Some((width, height)) = loaded_as {
         println!(

@@ -6,6 +6,8 @@ impl Desktop {
     /// One frame of the window: the desktop runs it for eframe, the browser
     /// build (`kit/web`) for its canvas.
     pub fn ui(&mut self, ctx: &egui::Context) {
+        self.apply_appearance(ctx);
+        look::paint_backdrop(ctx);
         for event in ctx.input(|i| i.events.clone()) {
             if let egui::Event::Screenshot { image, .. } = event {
                 if let Some(path) = self.snapshot_path.take() {
@@ -204,13 +206,16 @@ impl Desktop {
         self.rail(ctx);
         self.status_bar(ctx);
         self.workspace(ctx);
-        if actions.save && idle && self.document.is_some() {
+        if actions.save && idle && (self.document.is_some() || self.foreign.is_some()) {
             self.save_open = !self.save_open;
         }
         self.save_popup(ctx);
+        self.appearance_popup(ctx);
         self.stat_popups(ctx);
         self.node_menu_ui(ctx);
         self.shape_menu_ui(ctx);
+        self.licence_prompt(ctx);
+        self.vector_prompt(ctx);
 
         if actions.cancel {
             self.cancel();
@@ -240,6 +245,7 @@ impl Desktop {
             self.record_edits();
         }
         self.auto_convert_tick(ctx);
+        self.licence_tick(ctx);
         self.save_prefs();
     }
 }
