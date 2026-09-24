@@ -19,6 +19,7 @@
 )]
 use std::collections::BTreeMap;
 pub mod caps;
+pub mod clock;
 pub mod fitting;
 pub mod geometry;
 pub mod median_fills;
@@ -45,6 +46,7 @@ pub mod regularize;
 pub mod shapes;
 pub mod simplify;
 pub mod stacking;
+pub mod step_pow;
 pub mod sticker;
 pub mod straighten;
 pub mod strokes;
@@ -238,7 +240,7 @@ pub fn advanced_parameters(s: &AdvancedSettings, stage: Stage) -> Result<Paramet
         put(
             &mut p,
             "Segmenter::lambda_final",
-            f64::from((0.05 * 400_f64.powf(reverse / 11.)) as f32),
+            f64::from((0.05 * step_pow::step_pow(400., reverse / 11.)) as f32),
         );
         put(&mut p, "Segmenter::min_num_pixels", f64::from(s.min_pixels));
         // Engine fields +0x214 / +0x20C are not registered under both names.
@@ -266,8 +268,9 @@ pub fn advanced_parameters(s: &AdvancedSettings, stage: Stage) -> Result<Paramet
         } else {
             [40.; 3]
         };
-        let interpolate =
-            |lo: [f64; 3], hi: [f64; 3]| std::array::from_fn(|i| lo[i] * (hi[i] / lo[i]).powf(t));
+        let interpolate = |lo: [f64; 3], hi: [f64; 3]| {
+            std::array::from_fn(|i| lo[i] * step_pow::step_pow(hi[i] / lo[i], t))
+        };
         put_vec(
             &mut p,
             "ContourSmoother::measurement_types",
@@ -303,7 +306,7 @@ pub fn advanced_parameters(s: &AdvancedSettings, stage: Stage) -> Result<Paramet
         put(
             &mut p,
             "BezierFitter::stat_thresh_final",
-            0.1 * 200_f64.powf(reverse / 11.),
+            0.1 * step_pow::step_pow(200., reverse / 11.),
         );
         put(
             &mut p,

@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use vector_magic_rebuild::engine::{vectorize, Options as EngineOptions};
 use vector_magic_rebuild::{
-    auto_simplify_tolerance, changed_fraction, load_raster, preview, preview_tree, render_region,
+    auto_simplify_tolerance, changed_fraction, load_raster, preview, preview_pixels, preview_tree,
+    render_region,
     AUTO_TOLERANCE_CANDIDATES, AUTO_TOLERANCE_CHANGE_LIMIT,
 };
 
@@ -92,10 +93,11 @@ fn auto_tolerance_keeps_the_engines_picture() {
     let source = root().join("kit/fixtures/samples/logo-with-transparency.png");
     let raster = load_raster(&source).unwrap();
     let raw = vectorize(&raster, EngineOptions::default()).unwrap();
-    let (tolerance, document, image) = auto_simplify_tolerance(&raw).unwrap();
+    let (tolerance, document) = auto_simplify_tolerance(&raw).unwrap();
     assert!(AUTO_TOLERANCE_CANDIDATES.contains(&tolerance));
     assert_eq!(document.simplify_tolerance, Some(tolerance));
-    let reference = preview(raw.svg()).unwrap();
+    let reference = preview_pixels(raw.svg()).unwrap();
+    let image = preview_pixels(document.svg()).unwrap();
     let fraction = changed_fraction(&reference, &image);
     assert!(
         fraction <= AUTO_TOLERANCE_CHANGE_LIMIT || tolerance == AUTO_TOLERANCE_CANDIDATES[0],

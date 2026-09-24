@@ -10,7 +10,10 @@ description = "Offline raster-to-SVG reconstruction with compact shared curves"
 default-run = "vector-magic-rebuild"
 
 [features]
-desktop = ["dep:eframe", "dep:resvg"]
+# The SVG renderer alone: the Auto simplify tolerance compares renderings,
+# and the browser build (kit/web) needs it without the window.
+render = ["dep:resvg"]
+desktop = ["dep:eframe", "render"]
 ui-test = ["desktop"]
 profile = ["vector-rebuild/profile"]
 

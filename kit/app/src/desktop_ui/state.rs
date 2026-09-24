@@ -1001,7 +1001,7 @@ impl Desktop {
         // tolerance too, as if the button had been pressed.
         let (shown, auto_tolerance) = if automatic && settings.simplify.is_some() {
             let base = raw.without_islands(&settings.deleted)?;
-            let (tolerance, simplified, _) = crate::auto_simplify_tolerance(&base)?;
+            let (tolerance, simplified) = crate::auto_simplify_tolerance(&base)?;
             (Self::finish(simplified, settings)?, Some(tolerance))
         } else {
             (Self::derive(&raw, settings)?, None)

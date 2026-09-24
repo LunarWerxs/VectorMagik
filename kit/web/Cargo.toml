@@ -1,0 +1,22 @@
+[package]
+name = "vectormagik-web"
+version = "0.2.0"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+description = "VectorMagik's engine for the browser: the desktop's conversion chain as WebAssembly, run in a Web Worker"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+vector-magic-rebuild = { path = "../app", default-features = false, features = ["render"] }
+vector-rebuild = { path = "../rust" }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "pnm"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

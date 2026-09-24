@@ -2,7 +2,8 @@
 //! loaded raster, then the owned post-processing the desktop offers. No
 //! original code, binary or external process is involved.
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use vector_rebuild::clock::Stopwatch;
 use vector_rebuild::raster::Raster;
 use vector_rebuild::recovered_pipeline;
 use vector_rebuild::{basic_preset_code, AdvancedSettings, ImageCategory, Quality};
@@ -654,7 +655,7 @@ pub fn vectorize_with(
     {
         return Err("Input must be 2..4096 pixels per side, at most 16 million pixels, with complete RGBA data".into());
     }
-    let started = Instant::now();
+    let started = Stopwatch::start();
     let preset = basic_preset_code(options.category, options.quality);
     let advanced = effective_advanced(&options);
     let mut parameters = match &advanced {

@@ -126,7 +126,7 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
                 }
             }
             "--simplify" => simplify = Some(match value.as_str() {
-                "auto" if cfg!(feature = "desktop") => Simplify::Auto,
+                "auto" if cfg!(feature = "render") => Simplify::Auto,
                 "auto" => return Err(AUTO_SIMPLIFY_NEEDS_DESKTOP.into()),
                 tolerance => Simplify::Tolerance(
                     tolerance
@@ -301,9 +301,9 @@ fn run_engine(
     }
     match simplify {
         Some(Simplify::Tolerance(tolerance)) => doc = doc.simplified(tolerance)?,
-        #[cfg(feature = "desktop")]
+        #[cfg(feature = "render")]
         Some(Simplify::Auto) => doc = vector_magic_rebuild::auto_simplify_tolerance(&doc)?.1,
-        #[cfg(not(feature = "desktop"))]
+        #[cfg(not(feature = "render"))]
         Some(Simplify::Auto) => return Err(AUTO_SIMPLIFY_NEEDS_DESKTOP.into()),
         None => {}
     }
@@ -388,7 +388,7 @@ enum Simplify {
 /// 2026).
 const MAX_SIMPLIFY: f64 = 3.;
 const AUTO_SIMPLIFY_NEEDS_DESKTOP: &str =
-    "--simplify auto renders the drawing and needs a build with the desktop feature";
+    "--simplify auto renders the drawing and needs a build with the render (or desktop) feature";
 
 #[derive(Clone, Copy, PartialEq)]
 enum StickerArg {

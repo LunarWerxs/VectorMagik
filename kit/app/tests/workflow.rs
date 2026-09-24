@@ -461,7 +461,7 @@ fn simplify_auto_reproduces_the_desktop_chain() {
         ..engine::Options::default()
     };
     let raw = engine::vectorize(&raster, options).unwrap();
-    let (tolerance, simplified, _) = vector_magic_rebuild::auto_simplify_tolerance(&raw).unwrap();
+    let (tolerance, simplified) = vector_magic_rebuild::auto_simplify_tolerance(&raw).unwrap();
     // The same function the desktop's derive runs (`Desktop::finish`), with
     // the desktop's own defaults (its straightening is the engine crate's
     // defaults with Auto on, desktop_ui/tests.rs).

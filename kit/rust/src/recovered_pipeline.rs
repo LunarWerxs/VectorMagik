@@ -227,7 +227,7 @@ pub(crate) fn prepare_smoothing(
 
     // 0x473c20 and 0x473850.
     let order = value(preset, "Preprocessor::reduce_noise_order")? as i32;
-    let clock = std::time::Instant::now();
+    let clock = crate::clock::Stopwatch::start();
     let prepared = recovered_segmentation::preprocess(bgra, width, height, order);
     let preprocess_seconds = clock.elapsed().as_secs_f64();
 
@@ -373,7 +373,7 @@ pub fn vectorize_with_seed(
         units: DIAGONAL_UNITS,
         prepare: true,
     });
-    let clock = std::time::Instant::now();
+    let clock = crate::clock::Stopwatch::start();
     let smoothing = recovered_smoothing::smooth(&mut nodes, &mut contours, canvas, &params, aa)
         .map_err(|e| format!("Smoothing: {}", e.0))?;
     stages.smooth = clock.elapsed().as_secs_f64();
@@ -392,7 +392,7 @@ pub fn vectorize_with_seed(
     let flags: Vec<u8> = nodes.iter().map(|n| n.state).collect();
     let indices = vec![u32::MAX as usize; nodes.len()];
     let settings = fitting_settings(preset)?;
-    let clock = std::time::Instant::now();
+    let clock = crate::clock::Stopwatch::start();
     let (fitted, optimizer_report, optimizer_kept): (FittedContours, Option<_>, bool) =
         if options.optional_optimizer {
             let corners: Vec<Vec<bool>> = contours
@@ -462,7 +462,7 @@ pub fn vectorize_with_seed(
         straight_fills: options.straight_fills,
         ..ExportSettings::new(options.layering, options.stroking, EXPORT_DPI)
     };
-    let clock = std::time::Instant::now();
+    let clock = crate::clock::Stopwatch::start();
     let document = recovered_export::export(&shapes, &points, &curves, &export)?;
     stages.export = clock.elapsed().as_secs_f64();
     #[cfg(feature = "profile")]

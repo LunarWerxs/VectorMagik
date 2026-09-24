@@ -5,7 +5,7 @@ pub mod auto;
 pub mod desktop_ui;
 pub mod engine;
 pub mod export;
-mod pdf_eps;
+pub mod pdf_eps;
 #[cfg(feature = "desktop")]
 pub mod snapshot;
 
@@ -294,8 +294,10 @@ pub fn fit_for_engine(raster: Raster) -> Result<(Raster, Option<(usize, usize)>)
     Ok((raster, scaled_from.or(widened)))
 }
 
-#[cfg(feature = "desktop")]
-pub fn preview(svg: &str) -> Result<eframe::egui::ColorImage, String> {
+/// The document rendered at the preview size (1600 px on its longer side,
+/// at most 4x): its width, height and premultiplied RGBA bytes.
+#[cfg(feature = "render")]
+pub fn preview_pixels(svg: &str) -> Result<(usize, usize, Vec<u8>), String> {
     let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
         .map_err(|e| e.to_string())?;
     let size = tree.size();
@@ -309,9 +311,15 @@ pub fn preview(svg: &str) -> Result<eframe::egui::ColorImage, String> {
         resvg::tiny_skia::Transform::from_scale(factor, factor),
         &mut pixmap.as_mut(),
     );
+    Ok((width as usize, height as usize, pixmap.take()))
+}
+
+#[cfg(feature = "desktop")]
+pub fn preview(svg: &str) -> Result<eframe::egui::ColorImage, String> {
+    let (width, height, pixels) = preview_pixels(svg)?;
     Ok(eframe::egui::ColorImage::from_rgba_premultiplied(
-        [width as usize, height as usize],
-        pixmap.data(),
+        [width, height],
+        &pixels,
     ))
 }
 
@@ -370,31 +378,27 @@ pub fn render_region(
 /// 1.42 to 0.58 px with its 1.67 inflections per 100 px gone. A cap at 0.7
 /// or 1 px, or a stricter change limit (0.2% or 0.1%), kept more of the
 /// loss on at least one sample.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "render")]
 pub const AUTO_TOLERANCE_CANDIDATES: [f64; 6] = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5];
 /// Fraction of preview pixels allowed to change noticeably against the
 /// engine's own rendering.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "render")]
 pub const AUTO_TOLERANCE_CHANGE_LIMIT: f64 = 0.006;
 
 /// Fraction of pixels whose colour or alpha differs noticeably between two
-/// renderings of the same size.
-#[cfg(feature = "desktop")]
-pub fn changed_fraction(a: &eframe::egui::ColorImage, b: &eframe::egui::ColorImage) -> f64 {
-    if a.size != b.size || a.pixels.is_empty() {
+/// renderings of the same size (`preview_pixels`, premultiplied RGBA).
+#[cfg(feature = "render")]
+pub fn changed_fraction(a: &(usize, usize, Vec<u8>), b: &(usize, usize, Vec<u8>)) -> f64 {
+    if (a.0, a.1) != (b.0, b.1) || a.2.len() < 4 || a.2.len() != b.2.len() {
         return 1.;
     }
-    let changed = a
-        .pixels
+    let (pixels_a, pixels_b) = (a.2.as_chunks::<4>().0, b.2.as_chunks::<4>().0);
+    let changed = pixels_a
         .iter()
-        .zip(&b.pixels)
-        .filter(|(p, q)| {
-            let p = p.to_array();
-            let q = q.to_array();
-            (0..4).any(|c| p[c].abs_diff(q[c]) > 48)
-        })
+        .zip(pixels_b)
+        .filter(|(p, q)| (0..4).any(|c| p[c].abs_diff(q[c]) > 48))
         .count();
-    changed as f64 / a.pixels.len() as f64
+    changed as f64 / (a.2.len() / 4) as f64
 }
 
 /// The largest Auto tolerance a document traced with `preset` may take:
@@ -416,7 +420,7 @@ pub fn changed_fraction(a: &eframe::egui::ColorImage, b: &eframe::egui::ColorIma
 /// to 0.043 px and the circles' from 0.05 to 0.025, for files 1 to 5%
 /// larger; on the aliased logo it cost kinks (0.425 -> 0.515 per 100 px)
 /// and 11% more bytes, where cleaning up is what the owner asks for.
-#[cfg(feature = "desktop")]
+#[cfg(feature = "render")]
 pub fn auto_tolerance_cap(preset: usize) -> f64 {
     use vector_rebuild::{basic_preset_code, ImageCategory, Quality};
     let aliased = [Quality::High, Quality::Medium, Quality::Low]
@@ -440,13 +444,10 @@ pub fn auto_tolerance_cap(preset: usize) -> f64 {
 /// pixels change noticeably. Tried from the cap down, so the usual case,
 /// the cap passing, renders one candidate instead of every smaller one
 /// first (the astronaut spent 2.6 s after the engine rendering six, round
-/// two). Returns the tolerance with that simplified document and its
-/// preview, so a caller need not redo them.
-#[cfg(feature = "desktop")]
-pub fn auto_simplify_tolerance(
-    raw: &engine::Document,
-) -> Result<(f64, engine::Document, eframe::egui::ColorImage), String> {
-    let reference = preview(raw.svg())?;
+/// two). Returns the tolerance with that simplified document.
+#[cfg(feature = "render")]
+pub fn auto_simplify_tolerance(raw: &engine::Document) -> Result<(f64, engine::Document), String> {
+    let reference = preview_pixels(raw.svg())?;
     let cap = auto_tolerance_cap(raw.preset);
     for &tolerance in AUTO_TOLERANCE_CANDIDATES
         .iter()
@@ -454,15 +455,13 @@ pub fn auto_simplify_tolerance(
         .filter(|&&t| t <= cap)
     {
         let candidate = raw.simplified(tolerance)?;
-        let image = preview(candidate.svg())?;
+        let image = preview_pixels(candidate.svg())?;
         if changed_fraction(&reference, &image) <= AUTO_TOLERANCE_CHANGE_LIMIT {
-            return Ok((tolerance, candidate, image));
+            return Ok((tolerance, candidate));
         }
     }
     let tolerance = AUTO_TOLERANCE_CANDIDATES[0];
-    let candidate = raw.simplified(tolerance)?;
-    let image = preview(candidate.svg())?;
-    Ok((tolerance, candidate, image))
+    Ok((tolerance, raw.simplified(tolerance)?))
 }
 
 /// A region the user recoloured in the source so it traces as part of a

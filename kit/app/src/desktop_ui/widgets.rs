@@ -25,7 +25,7 @@ pub(super) fn spawn_deriver(ctx: egui::Context) -> (Sender<DeriveRequest>, Recei
                         (settings.simplify, base)
                     }
                     DeriveJob::Auto => {
-                        let (t, doc, _) = crate::auto_simplify_tolerance(&raw)?;
+                        let (t, doc) = crate::auto_simplify_tolerance(&raw)?;
                         (Some(t), doc)
                     }
                 };
