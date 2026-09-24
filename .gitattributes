@@ -1,0 +1,9 @@
+# No line-ending normalisation anywhere: the reference SVGs, the fixture CSVs
+# and several sources are byte-exact evidence (the writer emits CR LF on
+# purpose); git stores and checks out every file as it is.
+* -text
+*.png binary
+*.zip binary
+*.sqlite binary
+*.exe binary
+*.dll binary

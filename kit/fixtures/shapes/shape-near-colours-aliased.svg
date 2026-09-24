@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="170" viewBox="0 0 200 170">
+<!-- shape-near-colours-aliased: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="200" height="170" fill="#2c5aa0"/>
+<rect x="10" y="10" width="20" height="20" fill="#2c5aac"/>
+<rect x="40" y="10" width="16" height="16" fill="#385aa0"/>
+<rect x="66" y="10" width="12" height="12" fill="#2c66a0"/>
+<rect x="88" y="10" width="8" height="8" fill="#2c5ac0"/>
+<rect x="106" y="10" width="4" height="4" fill="#5c5aa0"/>
+<rect x="0" y="110" width="200" height="20" fill="#808080"/>
+<rect x="0" y="130" width="200" height="20" fill="#868686"/>
+</svg>

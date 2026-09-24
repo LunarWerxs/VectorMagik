@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="170" viewBox="0 0 200 170">
+<!-- shape-pies: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="200" height="170" fill="#ffffff"/>
+<path fill="#d62828" d="M 60.25 85.4 L 105.25 85.4 A 45 45 0 0 1 37.75 124.371 Z"/>
+<path fill="#f08c28" d="M 60.25 85.4 L 37.75 124.371 A 45 45 0 0 1 37.75 46.4289 Z"/>
+<path fill="#f5c518" d="M 60.25 85.4 L 37.75 46.4289 A 45 45 0 0 1 105.25 85.4 Z"/>
+<path fill="#1d4ed8" d="M 150.5 85.1 L 189.475 94.098 A 40 40 0 0 1 153.986 124.948 Z"/>
+<path fill="#15803d" d="M 150.5 85.1 L 153.986 124.948 A 40 40 0 0 1 113.68 100.729 Z"/>
+<path fill="#7c3aed" d="M 150.5 85.1 L 113.68 100.729 A 40 40 0 0 1 124.258 54.9116 Z"/>
+<path fill="#111111" d="M 150.5 85.1 L 124.258 54.9116 A 40 40 0 0 1 171.102 50.8133 Z"/>
+<path fill="#db2777" d="M 150.5 85.1 L 171.102 50.8133 A 40 40 0 0 1 189.475 94.098 Z"/>
+</svg>

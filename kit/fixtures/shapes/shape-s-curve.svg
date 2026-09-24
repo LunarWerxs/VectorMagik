@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">
+<!-- shape-s-curve: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="180" height="180" fill="#f59e0b"/>
+<path fill="#0f766e" d="M 0 70 C 95 20 85 160 180 110 L 180 10000 L 0 10000 Z"/>
+</svg>

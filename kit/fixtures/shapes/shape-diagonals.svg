@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120">
+<!-- shape-diagonals: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="200" height="120" fill="#ffffff"/>
+<polygon fill="#111111" points="19.6464,20.3536 79.6464,80.3536 80.3536,79.6464 20.3536,19.6464"/>
+<polygon fill="#dc2626" points="49.6464,20.3536 109.646,80.3536 110.354,79.6464 50.3536,19.6464"/>
+<polygon fill="#15803d" points="179.646,19.6464 119.646,79.6464 120.354,80.3536 180.354,20.3536"/>
+<polygon fill="#1d4ed8" points="20.3536,100.354 60.3536,60.3536 59.6464,59.6464 19.6464,99.6464"/>
+<polygon fill="#7c3aed" points="130.707,110.707 190.707,50.7071 189.293,49.2929 129.293,109.293"/>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="190" height="190" viewBox="0 0 190 190">
+<!-- shape-thin-rings: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="190" height="190" fill="#ffffff"/>
+<path fill-rule="evenodd" fill="#111111" d="M 175.7 95.6 A 80.4 80.4 0 1 0 14.9 95.6 A 80.4 80.4 0 1 0 175.7 95.6 Z M 174.95 95.6 A 79.65 79.65 0 1 0 15.65 95.6 A 79.65 79.65 0 1 0 174.95 95.6 Z"/>
+<path fill-rule="evenodd" fill="#111111" d="M 155.5 95.6 A 60.2 60.2 0 1 0 35.1 95.6 A 60.2 60.2 0 1 0 155.5 95.6 Z M 154 95.6 A 58.7 58.7 0 1 0 36.6 95.6 A 58.7 58.7 0 1 0 154 95.6 Z"/>
+<path fill-rule="evenodd" fill="#111111" d="M 135.4 95.6 A 40.1 40.1 0 1 0 55.2 95.6 A 40.1 40.1 0 1 0 135.4 95.6 Z M 133.4 95.6 A 38.1 38.1 0 1 0 57.2 95.6 A 38.1 38.1 0 1 0 133.4 95.6 Z"/>
+<path fill-rule="evenodd" fill="#c81e1e" d="M 115.6 95.6 A 20.3 20.3 0 1 0 75 95.6 A 20.3 20.3 0 1 0 115.6 95.6 Z M 114.6 95.6 A 19.3 19.3 0 1 0 76 95.6 A 19.3 19.3 0 1 0 114.6 95.6 Z"/>
+</svg>

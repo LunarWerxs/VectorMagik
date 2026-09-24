@@ -1,0 +1,322 @@
+{
+  "status": "diagnostic photo detail/color tradeoff; no embedded bitmap",
+  "renderer_dimensions": "exact fixture size, no output registration or resizing",
+  "fixture_provenance": "fixtures/photos/provenance.json",
+  "cases": [
+    {
+      "name": "astronaut.png",
+      "requested_colors": 8,
+      "width": 256,
+      "height": 256,
+      "colors": 8,
+      "loops": 107,
+      "shared_boundaries": 275,
+      "grid_edges": 7259,
+      "segments": 780,
+      "cubic_segments": 535,
+      "process_ms": 1063.7846000026911,
+      "svg_bytes": 55954,
+      "svg_sha256": "3d9e526fb65bb4c08ec35b1dae2dd16e40b65db3b3e6b6416ec271b405a580a6",
+      "source_sha256": "5539f948bfa35890d6aeaaa96cdb2d98114a8a7ccbc0aef48c22124bea3d0e54",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 21.829124400818273,
+          "rmse": 37.77786593623268,
+          "psnr": 16.586055187198593,
+          "ssim": 0.5277362437128419,
+          "minimum_alpha": 181,
+          "alpha_mae": 3.1110687255859375
+        },
+        "resvg": {
+          "rgb_mae": 21.867107376397826,
+          "rmse": 37.835746499532206,
+          "psnr": 16.572757468255954,
+          "ssim": 0.5269520281790084,
+          "minimum_alpha": 177,
+          "alpha_mae": 3.0323486328125
+        }
+      }
+    },
+    {
+      "name": "astronaut.png",
+      "requested_colors": 32,
+      "width": 256,
+      "height": 256,
+      "colors": 27,
+      "loops": 291,
+      "shared_boundaries": 757,
+      "grid_edges": 12667,
+      "segments": 1875,
+      "cubic_segments": 1186,
+      "process_ms": 1751.3202999834903,
+      "svg_bytes": 127726,
+      "svg_sha256": "94673a38ee7684f404ff864516adb173160392c420c3e28be291eee1553d3b28",
+      "source_sha256": "5539f948bfa35890d6aeaaa96cdb2d98114a8a7ccbc0aef48c22124bea3d0e54",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 18.7240868063534,
+          "rmse": 34.762427625954004,
+          "psnr": 17.308601654906287,
+          "ssim": 0.5348576113674683,
+          "minimum_alpha": 63,
+          "alpha_mae": 6.062744140625
+        },
+        "resvg": {
+          "rgb_mae": 18.774878109202664,
+          "rmse": 34.84744763901443,
+          "psnr": 17.287384124638653,
+          "ssim": 0.5327617693148902,
+          "minimum_alpha": 64,
+          "alpha_mae": 5.8802032470703125
+        }
+      }
+    },
+    {
+      "name": "astronaut.png",
+      "requested_colors": 64,
+      "width": 256,
+      "height": 256,
+      "colors": 27,
+      "loops": 291,
+      "shared_boundaries": 757,
+      "grid_edges": 12667,
+      "segments": 1875,
+      "cubic_segments": 1186,
+      "process_ms": 1970.484799996484,
+      "svg_bytes": 127726,
+      "svg_sha256": "94673a38ee7684f404ff864516adb173160392c420c3e28be291eee1553d3b28",
+      "source_sha256": "5539f948bfa35890d6aeaaa96cdb2d98114a8a7ccbc0aef48c22124bea3d0e54",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 18.7240868063534,
+          "rmse": 34.762427625954004,
+          "psnr": 17.308601654906287,
+          "ssim": 0.5348576113674683,
+          "minimum_alpha": 63,
+          "alpha_mae": 6.062744140625
+        },
+        "resvg": {
+          "rgb_mae": 18.774878109202664,
+          "rmse": 34.84744763901443,
+          "psnr": 17.287384124638653,
+          "ssim": 0.5327617693148902,
+          "minimum_alpha": 64,
+          "alpha_mae": 5.8802032470703125
+        }
+      }
+    },
+    {
+      "name": "chelsea.png",
+      "requested_colors": 8,
+      "width": 256,
+      "height": 170,
+      "colors": 8,
+      "loops": 177,
+      "shared_boundaries": 442,
+      "grid_edges": 8165,
+      "segments": 1149,
+      "cubic_segments": 735,
+      "process_ms": 753.8255000254139,
+      "svg_bytes": 77730,
+      "svg_sha256": "038ccd021a8b94ba24a7e2b2c1277074a77fab635f200b0a6d39aad721b63859",
+      "source_sha256": "a0c5fc7291f565be1821f242887b6a23b58b58e08cc24b1015c081dd76afdce1",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 17.717839142397153,
+          "rmse": 24.932533701973945,
+          "psnr": 20.19547531347491,
+          "ssim": 0.441548976911879,
+          "minimum_alpha": 32,
+          "alpha_mae": 5.153745404411764
+        },
+        "resvg": {
+          "rgb_mae": 17.7429212622549,
+          "rmse": 24.962061168831735,
+          "psnr": 20.1851947470519,
+          "ssim": 0.43985896702435784,
+          "minimum_alpha": 32,
+          "alpha_mae": 4.944140625
+        }
+      }
+    },
+    {
+      "name": "chelsea.png",
+      "requested_colors": 32,
+      "width": 256,
+      "height": 170,
+      "colors": 17,
+      "loops": 318,
+      "shared_boundaries": 844,
+      "grid_edges": 10313,
+      "segments": 1754,
+      "cubic_segments": 998,
+      "process_ms": 772.4640999804251,
+      "svg_bytes": 108403,
+      "svg_sha256": "c17499d554d9529bb1f3c3d57a0c1d1036519c70d7626cee65aac61f1e191f4e",
+      "source_sha256": "a0c5fc7291f565be1821f242887b6a23b58b58e08cc24b1015c081dd76afdce1",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 15.547800455353709,
+          "rmse": 23.181194914040933,
+          "psnr": 20.828087235662366,
+          "ssim": 0.4361996792163267,
+          "minimum_alpha": 33,
+          "alpha_mae": 7.10383731617647
+        },
+        "resvg": {
+          "rgb_mae": 15.569770821318723,
+          "rmse": 23.218032146109305,
+          "psnr": 20.814295445591032,
+          "ssim": 0.43419884799996833,
+          "minimum_alpha": 32,
+          "alpha_mae": 6.862270220588235
+        }
+      }
+    },
+    {
+      "name": "chelsea.png",
+      "requested_colors": 64,
+      "width": 256,
+      "height": 170,
+      "colors": 17,
+      "loops": 318,
+      "shared_boundaries": 844,
+      "grid_edges": 10313,
+      "segments": 1754,
+      "cubic_segments": 998,
+      "process_ms": 763.3749000087846,
+      "svg_bytes": 108403,
+      "svg_sha256": "c17499d554d9529bb1f3c3d57a0c1d1036519c70d7626cee65aac61f1e191f4e",
+      "source_sha256": "a0c5fc7291f565be1821f242887b6a23b58b58e08cc24b1015c081dd76afdce1",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 15.547800455353709,
+          "rmse": 23.181194914040933,
+          "psnr": 20.828087235662366,
+          "ssim": 0.4361996792163267,
+          "minimum_alpha": 33,
+          "alpha_mae": 7.10383731617647
+        },
+        "resvg": {
+          "rgb_mae": 15.569770821318723,
+          "rmse": 23.218032146109305,
+          "psnr": 20.814295445591032,
+          "ssim": 0.43419884799996833,
+          "minimum_alpha": 32,
+          "alpha_mae": 6.862270220588235
+        }
+      }
+    },
+    {
+      "name": "coffee.png",
+      "requested_colors": 8,
+      "width": 256,
+      "height": 171,
+      "colors": 8,
+      "loops": 76,
+      "shared_boundaries": 150,
+      "grid_edges": 4946,
+      "segments": 483,
+      "cubic_segments": 311,
+      "process_ms": 715.6258999893907,
+      "svg_bytes": 33039,
+      "svg_sha256": "f6acc43ac1679ff74b7dc5d785928e28284493135ba04562ccb28fcd30cb3af7",
+      "source_sha256": "cf41a81efbd79898d0b66c9d9616ecb046aa16353d280b41bcbf71f95e477897",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 18.588336522474485,
+          "rmse": 29.090380203815013,
+          "psnr": 18.8558156606442,
+          "ssim": 0.4725914385753345,
+          "minimum_alpha": 180,
+          "alpha_mae": 2.9956597222222223
+        },
+        "resvg": {
+          "rgb_mae": 18.630716266769866,
+          "rmse": 29.16705289154449,
+          "psnr": 18.832952624873414,
+          "ssim": 0.47127314950939825,
+          "minimum_alpha": 180,
+          "alpha_mae": 2.9144279970760234
+        }
+      }
+    },
+    {
+      "name": "coffee.png",
+      "requested_colors": 32,
+      "width": 256,
+      "height": 171,
+      "colors": 18,
+      "loops": 163,
+      "shared_boundaries": 382,
+      "grid_edges": 7757,
+      "segments": 1073,
+      "cubic_segments": 663,
+      "process_ms": 1409.7138000070117,
+      "svg_bytes": 71748,
+      "svg_sha256": "3b6f714185781424503fb3a67c2d2ecde0b2b27ef38bfb427e9aedc105b86232",
+      "source_sha256": "cf41a81efbd79898d0b66c9d9616ecb046aa16353d280b41bcbf71f95e477897",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 14.995450994725376,
+          "rmse": 27.26327852886803,
+          "psnr": 19.41924199955649,
+          "ssim": 0.4530114710649049,
+          "minimum_alpha": 179,
+          "alpha_mae": 5.317959612573099
+        },
+        "resvg": {
+          "rgb_mae": 15.047082801809808,
+          "rmse": 27.36399977648747,
+          "psnr": 19.38721204457628,
+          "ssim": 0.4507281873191246,
+          "minimum_alpha": 181,
+          "alpha_mae": 5.1826800073099415
+        }
+      }
+    },
+    {
+      "name": "coffee.png",
+      "requested_colors": 64,
+      "width": 256,
+      "height": 171,
+      "colors": 18,
+      "loops": 163,
+      "shared_boundaries": 382,
+      "grid_edges": 7757,
+      "segments": 1073,
+      "cubic_segments": 663,
+      "process_ms": 1184.8171000019647,
+      "svg_bytes": 71748,
+      "svg_sha256": "3b6f714185781424503fb3a67c2d2ecde0b2b27ef38bfb427e9aedc105b86232",
+      "source_sha256": "cf41a81efbd79898d0b66c9d9616ecb046aa16353d280b41bcbf71f95e477897",
+      "source_unchanged": true,
+      "metrics": {
+        "cairo": {
+          "rgb_mae": 14.995450994725376,
+          "rmse": 27.26327852886803,
+          "psnr": 19.41924199955649,
+          "ssim": 0.4530114710649049,
+          "minimum_alpha": 179,
+          "alpha_mae": 5.317959612573099
+        },
+        "resvg": {
+          "rgb_mae": 15.047082801809808,
+          "rmse": 27.36399977648747,
+          "psnr": 19.38721204457628,
+          "ssim": 0.4507281873191246,
+          "minimum_alpha": 181,
+          "alpha_mae": 5.1826800073099415
+        }
+      }
+    }
+  ]
+}

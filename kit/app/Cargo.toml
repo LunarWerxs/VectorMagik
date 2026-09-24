@@ -1,0 +1,45 @@
+[package]
+# Integration tests share ONE executable (tests/integration.rs, see its header).
+autotests = false
+name = "vector-magic-rebuild"
+version = "0.2.0"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+publish = false
+description = "Offline raster-to-SVG reconstruction with compact shared curves"
+default-run = "vector-magic-rebuild"
+
+[features]
+desktop = ["dep:eframe", "dep:resvg"]
+ui-test = ["desktop"]
+profile = ["vector-rebuild/profile"]
+
+[[bin]]
+name = "vector-magic-rebuild"
+path = "src/main.rs"
+
+[[bin]]
+name = "vector-magic-desktop"
+path = "src/desktop.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "vector-magic-preview"
+path = "src/preview_main.rs"
+required-features = ["desktop"]
+
+[dependencies]
+vector-rebuild = { path = "../rust" }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "pnm"] }
+eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "glow"], optional = true }
+resvg = { version = "=0.48.1", default-features = false, optional = true }
+# PDF streams (pdf_eps.rs); already in the build through image's PNG codec.
+miniz_oxide = "=0.8.9"
+
+[[example]]
+name = "render_svg"
+required-features = ["desktop"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

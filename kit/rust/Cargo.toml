@@ -1,0 +1,21 @@
+[package]
+name = "vector-rebuild"
+version = "0.1.0"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+description = "The recovered Vector Magic raster-to-vector engine plus owned post-processing"
+publish = false
+
+[dependencies]
+
+[lib]
+name = "vector_rebuild"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vector-rebuild"
+path = "src/main.rs"
+
+[features]
+# Wall-clock spans inside the engine, printed to stderr after a conversion.
+profile = []

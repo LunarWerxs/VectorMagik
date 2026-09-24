@@ -1,0 +1,83 @@
+{
+  "provenance": "scikit-image sample data (skimage.data), read as files; licensing as documented there.",
+  "transform": "Pillow RGB conversion and aspect-preserving Lanczos thumbnail to a maximum of 256 pixels. Benchmarks compare at this explicit fixture size.",
+  "images": [
+    {
+      "name": "astronaut",
+      "author": "NASA",
+      "license": "Public domain",
+      "source_sha256": "88431cd9653ccd539741b555fb0a46b61558b301d4110412b5bc28b5e3ea6cb5",
+      "original_size": [
+        512,
+        512
+      ],
+      "fixture_size": [
+        256,
+        256
+      ],
+      "fixture_sha256": "5539f948bfa35890d6aeaaa96cdb2d98114a8a7ccbc0aef48c22124bea3d0e54"
+    },
+    {
+      "name": "coffee",
+      "author": "Rachel Michetti",
+      "license": "CC0",
+      "source_sha256": "cc02f8ca188b167c775a7101b5d767d1e71792cf762c33d6fa15a4599b5a8de7",
+      "original_size": [
+        600,
+        400
+      ],
+      "fixture_size": [
+        256,
+        171
+      ],
+      "fixture_sha256": "cf41a81efbd79898d0b66c9d9616ecb046aa16353d280b41bcbf71f95e477897"
+    },
+    {
+      "name": "chelsea",
+      "author": "Stefan van der Walt",
+      "license": "CC0",
+      "source_sha256": "596aa1e7cb875eb79f437e310381d26b338a81c2da23439704a73c4651e8c4bb",
+      "original_size": [
+        451,
+        300
+      ],
+      "fixture_size": [
+        256,
+        170
+      ],
+      "fixture_sha256": "a0c5fc7291f565be1821f242887b6a23b58b58e08cc24b1015c081dd76afdce1"
+    }
+  ],
+  "upscaled": [
+    {
+      "name": "astronaut-x3",
+      "from_fixture": "astronaut.png",
+      "transform": "Pillow Lanczos resize by 3",
+      "fixture_size": [
+        768,
+        768
+      ],
+      "fixture_sha256": "333fd378ef67909fcfd29da35c335c6d0a26c5105b0341c6248551a7fa66c6b6"
+    },
+    {
+      "name": "chelsea-x3",
+      "from_fixture": "chelsea.png",
+      "transform": "Pillow Lanczos resize by 3",
+      "fixture_size": [
+        768,
+        510
+      ],
+      "fixture_sha256": "43f10633c48fc5ac268d835d1ea6a43bd57493cabb2135eb0271098e72f97e0e"
+    },
+    {
+      "name": "coffee-x3",
+      "from_fixture": "coffee.png",
+      "transform": "Pillow Lanczos resize by 3",
+      "fixture_size": [
+        768,
+        513
+      ],
+      "fixture_sha256": "3d7b537a7b2fcd25c33bdd92030290fa83d317e2a4f59283b87165ec6281abc3"
+    }
+  ]
+}

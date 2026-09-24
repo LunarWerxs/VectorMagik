@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="170" viewBox="0 0 180 170">
+<!-- shape-small-details: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="180" height="170" fill="#ffffff"/>
+<rect x="20" y="20" width="8" height="8" rx="2" ry="2" fill="#d62828"/>
+<rect x="40" y="20" width="12" height="12" rx="3" ry="3" fill="#1d4ed8"/>
+<rect x="64" y="20" width="10" height="10" rx="2.5" ry="2.5" fill="#0e7490"/>
+<circle cx="96.3" cy="25.4" r="4.4" fill="#15803d"/>
+<polygon fill="#7c3aed" points="-5.39223,102.995 184.608,107.965 185.392,77.9751 -4.60777,73.0051"/>
+</svg>

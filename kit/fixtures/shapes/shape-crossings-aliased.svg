@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+<!-- shape-crossings-aliased: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="200" height="100" fill="#ffffff"/>
+<polygon fill="#111111" points="9.74275,10.4287 109.743,70.4287 110.257,69.5713 10.2572,9.57125"/>
+<polygon fill="#1d4ed8" points="10.534,75.8455 105.534,15.8455 104.466,14.1545 9.46601,74.1545"/>
+<polygon fill="#dc2626" points="124.946,20.4971 189.946,27.4971 190.054,26.5029 125.054,19.5029"/>
+<polygon fill="#15803d" points="157.508,24.0894 169.508,90.0894 170.492,89.9106 158.492,23.9106"/>
+<polygon fill="#7c3aed" points="120.248,85.4341 190.248,45.4341 189.752,44.5659 119.752,84.5659"/>
+</svg>

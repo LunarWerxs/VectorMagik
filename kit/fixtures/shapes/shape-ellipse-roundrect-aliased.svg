@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="170" viewBox="0 0 200 170">
+<!-- shape-ellipse-roundrect-aliased: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="200" height="170" fill="#ffffff"/>
+<ellipse cx="58.4" cy="74.6" rx="42.3" ry="26.1" transform="rotate(20 58.4 74.6)" fill="#0e7490"/>
+<rect x="112.5" y="38.2" width="70" height="74.5" rx="14.6" ry="14.6" fill="#9333ea"/>
+</svg>

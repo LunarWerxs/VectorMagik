@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="110" height="80" viewBox="0 0 110 80">
+<!-- shape-outline-band-medium: exact geometry, written by kit/tools/shape_set.py -->
+<rect width="110" height="80" fill="#ffffff"/>
+<rect x="-5" y="48.15" width="120" height="16.25" fill="#f97316"/>
+<path fill-rule="evenodd" fill="#111111" d="M 19.2 15.3 H 84.1 V 56.2 H 19.2 Z M 20.9 17 H 82.4 V 54.5 H 20.9 Z"/>
+<polygon fill="#111111" points="91.057,-4.88475 102.057,85.1153 103.943,84.8847 92.943,-5.11525"/>
+</svg>

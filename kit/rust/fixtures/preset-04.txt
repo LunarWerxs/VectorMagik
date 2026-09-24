@@ -1,0 +1,148 @@
+# CoreEngine Configuration Parameters 
+  
+# Shared 
+  
+Shared::is_anti_aliased .............................      1
+Shared::image_type_code .............................      4
+  
+  
+# Preprocessor 
+  
+Preprocessor::filter_type ...........................      1
+Preprocessor::reduce_noise_order ....................      1
+  
+  
+# Palette Finder et al. 
+  
+PaletteFinder::cost_per_color .......................   0.15
+PaletteFinder::use_16_hist_bins .....................      1
+PaletteFinder::use_26_connected_peaks ...............      1
+EdgeImage::edge_weight_scale ........................     42
+EdgeImage::edge_weight_floor ........................ 0.0032
+  
+  
+# Segmenter 
+  
+Segmenter::max_iterations ...........................     50
+Segmenter::lambda_pre ............................... 0.0001
+Segmenter::lambda_initial ........................... 0.0001
+Segmenter::lambda_final .............................    0.5
+Segmenter::min_num_pixels ...........................      0
+Segmenter::num_iter_btwn_renum ......................      5
+Segmenter::rise_fraction ............................    0.4
+Segmenter::size_penalty_weight ......................      0
+Segmenter::size_penalty_power .......................      1
+Segmenter::use_over_seg_diag_extr ...................      0
+  
+  
+# SubPixelSegmenter 
+  
+SubPixelSegmenter::lambda_f .........................    0.1
+SubPixelSegmenter::beach_lambda_f ................... 1e-005
+SubPixelSegmenter::color_cluster_margin .............    0.1
+SubPixelSegmenter::use_connected_24_iteration .......      0
+  
+  
+# SuperPixelSegmenter 
+  
+SuperPixelSegmenter::lambda_f .......................   0.01
+SuperPixelSegmenter::use_connected_24_iteration .....      0
+  
+  
+# SubPixelSegmentation 
+  
+SubPixelSegmentation::self_weight_eps ...............    0.1
+SubPixelSegmentation::self_weight_penalty_low .......   0.01
+SubPixelSegmentation::self_weight_penalty_high ......      1
+  
+  
+# SuperPixels 
+  
+SuperPixels::self_weight_eps ........................    0.1
+SuperPixels::self_weight_penalty_low ................   0.01
+SuperPixels::self_weight_penalty_high ...............      1
+  
+FlowField::affinity_cost_scale ...................... 0.0001
+  
+  
+# ContourSmoother 
+  
+ContourSmoother::measurement_types ..................      1      1      1
+ContourSmoother::optimizer_type .....................      0      0      0
+ContourSmoother::prior_types ........................      3      3      3
+ContourSmoother::prior_strengths ....................      1      1      1
+ContourSmoother::length_penalty_weights .............      5    0.5    0.5
+ContourSmoother::do_puncture_corners ................      0      1      0
+ContourSmoother::is_enabled .........................      1      1      1
+  
+ContourSmoother::length_barrier_weight ..............    0.1
+ContourSmoother::air_pressure_weight ................      5
+ContourSmoother::perturbation_range .................   0.01
+ContourSmoother::puncture_flatness_thresh ...........    0.4
+ContourSmoother::puncture_corner_thresh .............      1
+ContourSmoother::anti_inv_pot_meas_scale ............    1.5
+ContourSmoother::anti_inv_pot_prior_scale ...........    1.5
+  
+# ContourSmoother - Optimizer 
+  
+ContourSmoother::phase_0.cg_line_search_type ........      5
+ContourSmoother::phase_0.cg_iter_for_restart ........      5
+ContourSmoother::phase_0.cg_min_iter ................     10
+ContourSmoother::phase_0.cg_max_iter ................     30
+ContourSmoother::phase_0.cg_knock_out_count_down ....     10
+ContourSmoother::phase_0.cg_use_eps_from_step .......      1
+ContourSmoother::phase_0.cg_quad_line_srch_max_iter .      1
+ContourSmoother::phase_0.cg_min_eps ................. 1e-006
+ContourSmoother::phase_0.cg_max_eps .................   0.01
+ContourSmoother::phase_0.cg_step_fraction ...........    0.1
+ContourSmoother::phase_0.cg_rel_tol ................. 1e-005
+ContourSmoother::phase_0.cg_abs_tol ................. 1e-005
+ContourSmoother::phase_0.cg_quad_line_srch_rel_tol ..  0.001
+ContourSmoother::phase_0.cg_max_step_size ...........    0.3
+ContourSmoother::phase_0.cg_num_blind_steps .........     50
+ContourSmoother::phase_0.cg_num_seeing_steps ........      2
+ContourSmoother::phase_0.cg_blind_blend_latest ......    0.5
+  
+ContourSmoother::phase_1.cg_line_search_type ........      5
+ContourSmoother::phase_1.cg_iter_for_restart ........     25
+ContourSmoother::phase_1.cg_min_iter ................     50
+ContourSmoother::phase_1.cg_max_iter ................    225
+ContourSmoother::phase_1.cg_knock_out_count_down ....     10
+ContourSmoother::phase_1.cg_use_eps_from_step .......      1
+ContourSmoother::phase_1.cg_quad_line_srch_max_iter .      1
+ContourSmoother::phase_1.cg_min_eps ................. 1e-006
+ContourSmoother::phase_1.cg_max_eps .................   0.01
+ContourSmoother::phase_1.cg_step_fraction ...........    0.1
+ContourSmoother::phase_1.cg_rel_tol ................. 1e-005
+ContourSmoother::phase_1.cg_abs_tol ................. 1e-005
+ContourSmoother::phase_1.cg_quad_line_srch_rel_tol ..  0.001
+ContourSmoother::phase_1.cg_max_step_size ...........    0.3
+ContourSmoother::phase_1.cg_num_blind_steps .........     50
+ContourSmoother::phase_1.cg_num_seeing_steps ........      2
+ContourSmoother::phase_1.cg_blind_blend_latest ......    0.5
+  
+ContourSmoother::phase_2.cg_line_search_type ........      5
+ContourSmoother::phase_2.cg_iter_for_restart ........     25
+ContourSmoother::phase_2.cg_min_iter ................     20
+ContourSmoother::phase_2.cg_max_iter ................    300
+ContourSmoother::phase_2.cg_knock_out_count_down ....     10
+ContourSmoother::phase_2.cg_use_eps_from_step .......      1
+ContourSmoother::phase_2.cg_quad_line_srch_max_iter .      1
+ContourSmoother::phase_2.cg_min_eps ................. 1e-006
+ContourSmoother::phase_2.cg_max_eps .................   0.01
+ContourSmoother::phase_2.cg_step_fraction ...........    0.1
+ContourSmoother::phase_2.cg_rel_tol ................. 2e-005
+ContourSmoother::phase_2.cg_abs_tol .................   0.01
+ContourSmoother::phase_2.cg_quad_line_srch_rel_tol ..  0.001
+ContourSmoother::phase_2.cg_max_step_size ...........    0.3
+ContourSmoother::phase_2.cg_num_blind_steps .........     50
+ContourSmoother::phase_2.cg_num_seeing_steps ........      2
+ContourSmoother::phase_2.cg_blind_blend_latest ......    0.5
+  
+  
+# BezierFitter 
+  
+BezierFitter::max_iterations ........................     20
+BezierFitter::stat_thresh_initial ................... 1e-008
+BezierFitter::stat_thresh_final .....................    0.2
+  
