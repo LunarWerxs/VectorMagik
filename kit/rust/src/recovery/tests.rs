@@ -140,10 +140,12 @@ fn a_gradient_has_no_one_colour_core() {
 #[test]
 fn lone_pixels_and_a_dotted_line_on_an_exact_palette_come_back_as_their_squares() {
     // A lone red pixel and a dotted black line of five dots on white, all
-    // of them merged into the field.
+    // of them merged into the field, and three more red pixels on the
+    // picture's border (in a corner, on the right edge, on the bottom), which
+    // the blended rule's border test once kept out.
     let pixels = (0..40 * 40)
         .map(|i| match (i % 40, i / 40) {
-            (10, 10) => Rgba([220, 30, 30, 255]),
+            (10, 10) | (0, 0) | (39, 17) | (5, 39) => Rgba([220, 30, 30, 255]),
             (20 | 22 | 24 | 26 | 28, 20) => Rgba([0, 0, 0, 255]),
             _ => Rgba([255, 255, 255, 255]),
         })
@@ -155,7 +157,7 @@ fn lone_pixels_and_a_dotted_line_on_an_exact_palette_come_back_as_their_squares(
     };
     let white = MERGED.replace("#2c5aa0", "#ffffff");
     let (svg, stats) = recover_exact(&white, &source).unwrap();
-    assert_eq!(stats.recovered, 6, "{svg}");
+    assert_eq!(stats.recovered, 9, "{svg}");
     let found = islands(&svg).unwrap();
     assert_eq!(
         found.iter().filter(|i| i.color == "#000000").count(),

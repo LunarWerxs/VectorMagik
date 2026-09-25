@@ -558,6 +558,9 @@ struct Machine {
     next_save: u32,
     /// Path segments held by saved graphics states.
     saved_segments: usize,
+    /// While a pattern's tiles are drawn over a rectangle (device space:
+    /// left, bottom, right, top): only what lies wholly inside it is kept.
+    within: Option<[f64; 4]>,
     /// The files being run, `currentfile` last.
     files: Vec<File>,
     /// The operands of the operators running, restored when one fails.
@@ -671,6 +674,7 @@ impl Machine {
             saves: Vec::new(),
             next_save: 0,
             saved_segments: 0,
+            within: None,
             files: Vec::new(),
             snap: Vec::new(),
             steps: 0,

@@ -217,7 +217,9 @@ pub(super) fn open_url(ctx: &egui::Context, url: &str) {
         let opened = std::process::Command::new("rundll32")
             .args(["url.dll,FileProtocolHandler", url])
             .spawn();
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        let opened = std::process::Command::new("open").arg(url).spawn();
+        #[cfg(not(any(windows, target_os = "macos")))]
         let opened = std::process::Command::new("xdg-open").arg(url).spawn();
         drop(opened);
     }

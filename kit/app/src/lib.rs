@@ -3,6 +3,7 @@ use vector_rebuild::raster::{Raster, Rgba};
 pub mod auto;
 #[cfg(feature = "ui")]
 pub mod desktop_ui;
+pub mod dither;
 pub mod dxf;
 pub mod emf;
 pub mod engine;
@@ -487,8 +488,22 @@ pub fn auto_tolerance_cap(preset: usize) -> f64 {
 /// the cap passing, renders one candidate instead of every smaller one
 /// first (the astronaut spent 2.6 s after the engine rendering six, round
 /// two). Returns the tolerance with that simplified document.
+/// Source pixels: Auto simplify's tolerance for a document traced from its
+/// pixels, merged as by hand (quality round depixel-r3: 0.1 and 0.2 within
+/// the tie of each other, 0.1 the more faithful; none, and the desktop's
+/// 0.5, scored worse).
+#[cfg(feature = "render")]
+const PIXEL_TRACED_SIMPLIFY: f64 = 0.1;
+
 #[cfg(feature = "render")]
 pub fn auto_simplify_tolerance(raw: &engine::Document) -> Result<(f64, engine::Document), String> {
+    // Smoothed from its pixels already (`engine::Document::pixel_traced`).
+    if raw.pixel_traced {
+        return Ok((
+            PIXEL_TRACED_SIMPLIFY,
+            raw.simplified_by_hand(PIXEL_TRACED_SIMPLIFY)?,
+        ));
+    }
     let reference = preview_pixels(raw.svg())?;
     let cap = auto_tolerance_cap(raw.preset);
     for &tolerance in AUTO_TOLERANCE_CANDIDATES

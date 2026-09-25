@@ -313,6 +313,14 @@ pub struct Document {
     /// The document before its hand-rounded corners (`smoothed`), so a
     /// rounded corner being dragged can show the outline it will round again.
     pub unrounded: Option<Arc<String>>,
+    /// Traced from its pixels (`vector_rebuild::depixel`): its straight sides
+    /// drawn as lines and its curves smooth already, so Auto simplify merges
+    /// only within 0.1 px (`auto_simplify_tolerance`), and true lines and
+    /// circles and Auto straighten leave it. At the desktop's Auto (0.5 px),
+    /// simplifying merged a 1 px line's cap corners into its sides and
+    /// straightening snapped its sides; true lines met the traced curves at
+    /// small angles (quality round depixel-r3).
+    pub pixel_traced: bool,
 }
 impl Document {
     pub fn svg(&self) -> &str {
@@ -461,10 +469,23 @@ impl Document {
         forced: &[vector_rebuild::geometry::Point],
     ) -> Result<Self, String> {
         let regularized = match regularize {
-            Some(options) => self.regularized(options)?,
-            None => self.clone(),
+            Some(options) if !self.pixel_traced => self.regularized(options)?,
+            _ => self.clone(),
         };
         let straightened = match straighten {
+            // A pixel-traced document's Auto bow is none: only the nodes
+            // straightened by hand are.
+            Some(options) if self.pixel_traced && options.auto && forced.is_empty() => regularized,
+            Some(options) if self.pixel_traced && options.auto => regularized.straightened(
+                vector_rebuild::straighten::StraightenOptions {
+                    auto: false,
+                    flatness: 0.,
+                    angle: 0.,
+                    ..options
+                }
+                .for_preset(self.preset),
+                forced,
+            )?,
             Some(options) => regularized.straightened(options.for_preset(self.preset), forced)?,
             None => regularized,
         };
@@ -748,8 +769,39 @@ pub fn vectorize_with(
                 // 4x sprite's stepped round took curves 0.39 px off it).
                 source: None,
                 unrounded: None,
+                pixel_traced: false,
             });
         }
+    }
+    // Pixel-edged artwork of an exact palette is traced from its pixels
+    // (`vector_rebuild::depixel`): at a 10 px cap the engine's smoothing broke
+    // its letters (quality round depixel-r3, verdict section 32).
+    if palette.is_some() {
+        let rgba: Vec<[u8; 4]> = raster.pixels.iter().map(|p| p.0).collect();
+        let (svg, regions, nodes) =
+            vector_rebuild::depixel::trace(&rgba, raster.width, raster.height);
+        return Ok(Document {
+            svg,
+            width: raster.width,
+            height: raster.height,
+            preset,
+            advanced,
+            elapsed: started.elapsed(),
+            photo_overlap: false,
+            simplify_tolerance: None,
+            optional_optimizer: false,
+            regions,
+            nodes,
+            curves: 0,
+            corners: 0,
+            optimizer_unknowns: 0,
+            optimizer_kept: false,
+            optimizer_objective: None,
+            stages: recovered_pipeline::StageSeconds::default(),
+            source: Some(Arc::new(raster.clone())),
+            unrounded: None,
+            pixel_traced: true,
+        });
     }
     let conversion = recovered_pipeline::vectorize(
         &bgra,
@@ -787,8 +839,11 @@ pub fn vectorize_with(
         svg = recovered;
         regions += stats.recovered;
         // Thin strokes drawn in their ink at their width (anti-aliased
-        // artwork: pixel-edged strokes are their palette's colour already).
+        // artwork: pixel-edged strokes are their palette's colour already),
+        // after small lettering is drawn from its pixels' half-coverage
+        // outline (`vector_rebuild::glyphs`), which leaves it in its ink.
         if options.category == ImageCategory::AntiAliasedArtwork {
+            svg = vector_rebuild::glyphs::redraw_glyphs(&svg, raster)?.0;
             svg = vector_rebuild::strokes::ink_strokes(&svg, raster)?.0;
         } else {
             // Pixel-edged strokes keep square ends (`vector_rebuild::caps`).
@@ -848,6 +903,7 @@ pub fn vectorize_with(
         stages: conversion.stages,
         source: Some(Arc::new(raster.clone())),
         unrounded: None,
+        pixel_traced: false,
     })
 }
 

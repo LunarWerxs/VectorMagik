@@ -1120,7 +1120,15 @@ impl Desktop {
                 self.source_size = scaled_from;
                 self.load_source_textures(ctx, &raster);
                 self.detected = Some(crate::auto::detect(&raster));
-                let shortcut = ctx.format_shortcut(&SC_CONVERT);
+                // By name, as egui formats it off a Mac: on a Mac egui asks the
+                // fonts whether they can draw its symbols, and a picture can
+                // load before the first frame has any fonts (a snapshot, a
+                // test), which panicked.
+                let mac = matches!(
+                    ctx.os(),
+                    egui::os::OperatingSystem::Mac | egui::os::OperatingSystem::IOS
+                );
+                let shortcut = SC_CONVERT.format(&egui::ModifierNames::NAMES, mac);
                 let size = match scaled_from {
                     Some((width, height)) => format!(
                         "{width} \u{00D7} {height} px scaled to {} \u{00D7} {} px, the largest \

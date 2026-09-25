@@ -4,7 +4,9 @@
 //! writes each visible path it finds in page space, in points, with its
 //! fill and stroke. What flat paths cannot hold is left out and named:
 //! gradients and patterns are drawn in one colour (the gradient's middle
-//! stop), clip paths, masks and filters are not applied, embedded images
+//! stop; a rectangle filled with a pattern of solid pieces, as the app saves
+//! a dithered area, is drawn as those pieces), clip paths, masks and filters
+//! are not applied, embedded images
 //! are left out, and text is kept only where the parser drew it as outlines
 //! (the app carries no fonts, so usually it is left out).
 
@@ -147,6 +149,14 @@ impl Writer {
         let Some(data) = path.data().clone().transform(transform) else {
             return;
         };
+        if let (Some(fill), None) = (path.fill(), path.stroke()) {
+            if let usvg::Paint::Pattern(pattern) = fill.paint() {
+                let alpha = opacity * f64::from(fill.opacity().get());
+                if self.tiled(path, pattern, alpha) {
+                    return;
+                }
+            }
+        }
         let d = self.data(&data);
         if d.is_empty() {
             return;
@@ -197,6 +207,112 @@ impl Writer {
         element.push_str("/>\n");
         self.body.push_str(&element);
         self.paths += 1;
+    }
+
+    /// A rectangle filled with a pattern of solid, unstroked pieces, as the
+    /// app saves a dithered area (`dither.rs`): the tile's pieces repeated
+    /// across the rectangle, each subpath kept where it lies wholly inside
+    /// it, one path per colour. False, with nothing drawn, for any other
+    /// path or pattern (it is drawn in one colour, as before).
+    fn tiled(&mut self, path: &usvg::Path, pattern: &usvg::Pattern, alpha: f64) -> bool {
+        use usvg::tiny_skia_path::{PathBuilder, PathSegment, Transform};
+        /// Pieces drawn, at most, before a pattern is drawn in one colour.
+        const MAX_PIECES: usize = 1 << 21;
+        let bounds = path.data().bounds();
+        let (left, top, right, bottom) =
+            (bounds.left(), bounds.top(), bounds.right(), bounds.bottom());
+        let rectangle = path.data().segments().all(|segment| match segment {
+            PathSegment::MoveTo(p) | PathSegment::LineTo(p) => {
+                (p.x == left || p.x == right) && (p.y == top || p.y == bottom)
+            }
+            PathSegment::Close => true,
+            _ => false,
+        });
+        if !rectangle || !pattern.transform().is_identity() {
+            return false;
+        }
+        // The tile's subpaths with their colours.
+        let mut pieces: Vec<(usvg::Color, usvg::tiny_skia_path::Path)> = Vec::new();
+        for node in pattern.root().children() {
+            let usvg::Node::Path(child) = node else {
+                return false;
+            };
+            let colour = match child.fill().map(|f| f.paint()) {
+                Some(usvg::Paint::Color(c)) if child.stroke().is_none() => *c,
+                _ => return false,
+            };
+            let Some(data) = child.data().clone().transform(child.abs_transform()) else {
+                return false;
+            };
+            let mut builder = PathBuilder::new();
+            for segment in data.segments() {
+                match segment {
+                    PathSegment::MoveTo(p) => {
+                        if let Some(done) = std::mem::take(&mut builder).finish() {
+                            pieces.push((colour, done));
+                        }
+                        builder.move_to(p.x, p.y);
+                    }
+                    PathSegment::LineTo(p) => builder.line_to(p.x, p.y),
+                    PathSegment::QuadTo(a, p) => builder.quad_to(a.x, a.y, p.x, p.y),
+                    PathSegment::CubicTo(a, b, p) => builder.cubic_to(a.x, a.y, b.x, b.y, p.x, p.y),
+                    PathSegment::Close => builder.close(),
+                }
+            }
+            if let Some(done) = builder.finish() {
+                pieces.push((colour, done));
+            }
+        }
+        let rect = pattern.rect();
+        let (w, h) = (rect.width(), rect.height());
+        let first = |lo: f32, origin: f32, step: f32| ((lo - origin) / step).floor() as i64;
+        let last = |hi: f32, origin: f32, step: f32| ((hi - origin) / step).ceil() as i64;
+        let (i0, i1) = (first(left, rect.x(), w), last(right, rect.x(), w));
+        let (j0, j1) = (first(top, rect.y(), h), last(bottom, rect.y(), h));
+        let tiles = (i1 - i0).max(0) as usize * (j1 - j0).max(0) as usize;
+        if pieces.is_empty() || tiles.saturating_mul(pieces.len()) > MAX_PIECES {
+            return false;
+        }
+        let transform = path.abs_transform();
+        let slack = 1e-3 * w.max(h);
+        let mut by_colour: Vec<(usvg::Color, String)> = Vec::new();
+        for j in j0..j1 {
+            for i in i0..i1 {
+                let at =
+                    Transform::from_translate(rect.x() + i as f32 * w, rect.y() + j as f32 * h);
+                for (colour, piece) in &pieces {
+                    let Some(moved) = piece.clone().transform(at) else {
+                        continue;
+                    };
+                    let b = moved.bounds();
+                    let inside = b.left() >= left - slack
+                        && b.top() >= top - slack
+                        && b.right() <= right + slack
+                        && b.bottom() <= bottom + slack;
+                    let Some(placed) = inside.then(|| moved.transform(transform)).flatten() else {
+                        continue;
+                    };
+                    let d = self.data(&placed);
+                    match by_colour.iter_mut().find(|(c, _)| c == colour) {
+                        Some((_, all)) => all.push_str(&d),
+                        None => by_colour.push((*colour, d)),
+                    }
+                }
+            }
+        }
+        for (colour, d) in by_colour {
+            let _ = write!(
+                self.body,
+                "<path d=\"{d}\" fill=\"#{:02x}{:02x}{:02x}\"",
+                colour.red, colour.green, colour.blue
+            );
+            if alpha < 0.999 {
+                let _ = write!(self.body, " fill-opacity=\"{}\"", num(alpha));
+            }
+            self.body.push_str("/>\n");
+            self.paths += 1;
+        }
+        true
     }
 
     /// `path` as path data in points; quadratics become cubics.

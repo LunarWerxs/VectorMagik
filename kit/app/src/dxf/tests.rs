@@ -18,11 +18,12 @@ fn pairs(dxf: &[u8]) -> Pairs {
 
 /// The entities section as each entity's type and its pairs.
 fn entities(pairs: &Pairs) -> Vec<(String, Pairs)> {
-    let start = pairs
-        .iter()
-        .position(|p| p.0 == 2 && p.1 == "ENTITIES")
-        .unwrap()
-        + 1;
+    section(pairs, "ENTITIES")
+}
+
+/// A section's items as each one's type and its pairs.
+fn section(pairs: &Pairs, name: &str) -> Vec<(String, Pairs)> {
+    let start = pairs.iter().position(|p| p.0 == 2 && p.1 == name).unwrap() + 1;
     let length = pairs[start..]
         .iter()
         .position(|p| p.0 == 0 && p.1 == "ENDSEC")
@@ -204,31 +205,7 @@ fn the_spline_mode_keeps_every_cubic_and_every_handle_resolves() {
         points(stroke),
         [(50., 5.), (60., 15.), (80., -5.), (95., 5.)]
     );
-    // Every handle unique and below the seed; every owner and pointer a
-    // handle (or 0, the file itself).
-    let seed = pairs
-        .iter()
-        .position(|p| p.1 == "$HANDSEED")
-        .map(|i| u32::from_str_radix(&pairs[i + 1].1, 16).unwrap())
-        .unwrap();
-    let body = &pairs[pairs.iter().position(|p| p.1 == "ENDSEC").unwrap()..];
-    let handles: Vec<u32> = body
-        .iter()
-        .filter(|p| p.0 == 5 || p.0 == 105)
-        .map(|p| u32::from_str_radix(&p.1, 16).unwrap())
-        .collect();
-    let mut unique = handles.clone();
-    unique.sort_unstable();
-    unique.dedup();
-    assert_eq!(unique.len(), handles.len());
-    assert!(handles.iter().all(|h| *h < seed));
-    for (code, pointer) in body.iter().filter(|p| [330, 340, 350, 390].contains(&p.0)) {
-        let pointer = u32::from_str_radix(pointer, 16).unwrap();
-        assert!(
-            (*code == 330 && pointer == 0) || handles.contains(&pointer),
-            "{code} {pointer:X}"
-        );
-    }
+    handles_resolve(&pairs);
     // Every layer's plot style is the Normal placeholder: without one
     // Illustrator's AutoCAD import refuses the file.
     let placeholder = pairs
@@ -258,6 +235,154 @@ fn the_spline_mode_keeps_every_cubic_and_every_handle_resolves() {
         sections,
         ["HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS"]
     );
+}
+
+/// Every handle of an R2000 file unique and below the seed; every owner and
+/// pointer a handle (or 0, the file itself).
+fn handles_resolve(pairs: &Pairs) {
+    let seed = pairs
+        .iter()
+        .position(|p| p.1 == "$HANDSEED")
+        .map(|i| u32::from_str_radix(&pairs[i + 1].1, 16).unwrap())
+        .unwrap();
+    let body = &pairs[pairs.iter().position(|p| p.1 == "ENDSEC").unwrap()..];
+    let handles: Vec<u32> = body
+        .iter()
+        .filter(|p| p.0 == 5 || p.0 == 105)
+        .map(|p| u32::from_str_radix(&p.1, 16).unwrap())
+        .collect();
+    let mut unique = handles.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), handles.len());
+    assert!(handles.iter().all(|h| *h < seed));
+    for (code, pointer) in body.iter().filter(|p| [330, 340, 350, 390].contains(&p.0)) {
+        let pointer = u32::from_str_radix(pointer, 16).unwrap();
+        assert!(
+            (*code == 330 && pointer == 0) || handles.contains(&pointer),
+            "{code} {pointer:X}"
+        );
+    }
+}
+
+/// Each polyline among `items` (R12's with their vertices, or R2000's
+/// lightweight ones): its layer and its corners, rounded to a millionth and
+/// sorted, so a square compares whatever corner it starts from.
+fn rings(items: &[(String, Pairs)]) -> Vec<(String, Vec<(i64, i64)>)> {
+    let mut out: Vec<(String, Vec<Xy>)> = Vec::new();
+    for (kind, pairs) in items {
+        match kind.as_str() {
+            "POLYLINE" => out.push((value(pairs, 8).to_owned(), Vec::new())),
+            "VERTEX" => out.last_mut().unwrap().1.extend(points(pairs)),
+            "LWPOLYLINE" => out.push((value(pairs, 8).to_owned(), points(pairs))),
+            _ => {}
+        }
+    }
+    out.into_iter()
+        .map(|(layer, ring)| {
+            let mut corners: Vec<(i64, i64)> = ring
+                .iter()
+                .map(|p| ((p.0 * 1e6).round() as i64, (p.1 * 1e6).round() as i64))
+                .collect();
+            corners.sort_unstable();
+            (layer, corners)
+        })
+        .collect()
+}
+
+#[test]
+fn a_dithered_area_is_arrays_of_its_tile_that_explode_to_its_squares() {
+    // A red checker of 1 pt squares, 9 by 7 cells from (2, 3): its tile is
+    // 2 by 2 and it ends a column and a row into a tile, so every part of a
+    // tile is placed. One more red square stands alone.
+    let square = |x: usize, y: usize| {
+        format!(
+            " M {x} {y} L {} {y} L {} {} L {x} {} Z",
+            x + 1,
+            x + 1,
+            y + 1,
+            y + 1
+        )
+    };
+    let mut cells: Vec<(usize, usize)> = (0..7)
+        .flat_map(|y| (0..9).map(move |x| (x, y)))
+        .filter(|(x, y)| (x + y) % 2 == 0)
+        .map(|(x, y)| (x + 2, y + 3))
+        .collect();
+    cells.push((30, 15));
+    let d: String = cells.iter().map(|&(x, y)| square(x, y)).collect();
+    let svg = format!("<svg width=\"40pt\" height=\"20pt\" viewBox=\"0 0 40 20\"><path fill=\"#ff0000\" d=\"{d}\" /></svg>");
+    let mut expected: Vec<(String, Vec<(i64, i64)>)> = cells
+        .iter()
+        .map(|&(x, y)| {
+            let (x, y) = (x as i64 * 1_000_000, (20 - y as i64) * 1_000_000);
+            let mut corners = vec![
+                (x, y),
+                (x + 1_000_000, y),
+                (x, y - 1_000_000),
+                (x + 1_000_000, y - 1_000_000),
+            ];
+            corners.sort_unstable();
+            ("COLOR_FF0000".to_owned(), corners)
+        })
+        .collect();
+    expected.sort();
+    for mode in [DxfMode::Splines, DxfMode::FineLines, DxfMode::CoarseLines] {
+        let pairs = pairs(&to_dxf(&svg, mode).unwrap());
+        // Each block's outlines by its name.
+        let mut blocks = HashMap::new();
+        let (mut name, mut items) = (String::new(), Vec::new());
+        for item in section(&pairs, "BLOCKS") {
+            match item.0.as_str() {
+                "BLOCK" => name = value(&item.1, 2).to_owned(),
+                "ENDBLK" => {
+                    blocks.insert(std::mem::take(&mut name), rings(&items));
+                    items.clear();
+                }
+                _ => items.push(item),
+            }
+        }
+        let entities = entities(&pairs);
+        let mut drawn = rings(&entities);
+        let loose = drawn.len();
+        let mut arrays = 0;
+        for (_, insert) in entities.iter().filter(|e| e.0 == "INSERT") {
+            let count = |code: u16| numbers(insert, code).first().map_or(1, |n| *n as i64);
+            let spacing = |code: u16| {
+                numbers(insert, code)
+                    .first()
+                    .map_or(0, |n| (n * 1e6).round() as i64)
+            };
+            let (columns, rows) = (count(70), count(71));
+            let (dx, dy) = (spacing(44), spacing(45));
+            let at = points(insert)[0];
+            let at = ((at.0 * 1e6).round() as i64, (at.1 * 1e6).round() as i64);
+            assert_eq!(value(insert, 8), "COLOR_FF0000");
+            arrays += 1;
+            for (layer, corners) in &blocks[value(insert, 2)] {
+                for c in 0..columns {
+                    for r in 0..rows {
+                        let mut moved: Vec<(i64, i64)> = corners
+                            .iter()
+                            .map(|p| (p.0 + at.0 + c * dx, p.1 + at.1 + r * dy))
+                            .collect();
+                        moved.sort_unstable();
+                        drawn.push((layer.clone(), moved));
+                    }
+                }
+            }
+        }
+        drawn.sort();
+        assert_eq!(drawn, expected, "{mode:?}");
+        // The lone square stays an outline; the 32 of the checker are four
+        // arrays of three blocks of four squares in all.
+        assert_eq!((loose, arrays), (1, 4), "{mode:?}");
+        let tiles = blocks.iter().filter(|b| !b.0.starts_with('*'));
+        assert_eq!(tiles.map(|b| b.1.len()).sum::<usize>(), 4, "{mode:?}");
+        if mode == DxfMode::Splines {
+            handles_resolve(&pairs);
+        }
+    }
 }
 
 #[test]

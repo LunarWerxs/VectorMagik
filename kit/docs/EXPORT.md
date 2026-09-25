@@ -105,6 +105,49 @@ the source size, both categories): the original's fill is off by 20.8 levels
 on average and 63.7 at most over white (21.0 and 63.7 over black), the
 straight fill by 0.27 and 1.0 (0.23 and 1.0).
 
+## Owned: dithered areas as pattern fills (September 24, 2026)
+
+A picture with an exact palette comes back pixel for pixel (the exact
+recovery), so a dithered area is one square per pixel: the 96 px checker of
+work/dither-sample.png saved as 4,608 squares, 207 KB of SVG. `dither.rs`
+finds, in each unstroked one-colour path, the rectangles over which its
+squares repeat a tile of up to 8 by 8 cells (at least two tiles each way and
+16 squares; the largest rectangle each round, over every tile size, grown to
+where the repetition stops). The saved SVG draws each such rectangle once,
+filled with a `pattern` of the tile (`patternUnits="userSpaceOnUse"`, anchored
+at the rectangle's corner), right after what is left of its path; the PDF
+(and so the AI) fills it with a tiling pattern (type 1, coloured, its matrix
+onto the page), the EPS with `makepattern`. The document in the app keeps its
+squares: the preview and every edit see them as before. Inside a translucent
+group the PDF keeps the squares (a pattern there would be placed in the
+group's space), and a path with boundary strokes is left whole. The app's
+three vector readers draw such a pattern back as its squares ("Convert it" of
+a saved file), so a save and a reopen draw the same pixels; other programs'
+patterns are still drawn in one colour.
+
+DXF and EMF (September 25, 2026). A DXF holds outlines, not fills, so
+`dxf.rs` makes the tile a block of its inked squares and places it as
+AutoCAD's rectangular array (an `INSERT` with column and row counts, which R12
+has too); the columns and rows where the rectangle ends inside a tile are
+arrays of the part of the tile they hold, and blocks drawing the same squares
+are made once. A hatch was the first idea and is not used: its pattern is
+lines clipped to a boundary, so the squares would come back as loose edges,
+and the edges on the boundary as each reader decides. EMF has no pattern that
+scales with the drawing (a GDI pattern brush tiles in the output device's
+pixels and paints every cell of its tile, the cells between the squares too),
+so `emf.rs` writes the area's squares as one `EMR_POLYPOLYGON16` after the rest
+of the path, four corners a square where the path spent a move, a line record
+and a close; a bitmap stretched over the area would be smaller still but turn
+the squares into a picture. On the dither sample (desktop chain, stacked;
+testing/pattern-fills-dxf-emf-2026-09-25): DXF 1,029,317 -> 44,637 bytes
+(splines), 1,723,175 -> 65,263 (fine lines), 1,720,052 -> 62,140 (coarse
+lines), EMF 326,676 -> 104,460. ezdxf reads every file strictly with no audit
+error and, the arrays exploded, draws exactly the old files' outlines (4,795
+and 4,789); Illustrator's AutoCAD import, the strict reader, opens all six and
+draws every outline where the SVG has it (12 of 12 checks); GDI and GDI+ draw the new EMF and the old one alike to the pixel at
+1x and 4x. The 34 frozen references saved as DXF in the three modes and as EMF
+come out byte for byte as before (136 files).
+
 ## Lessons
 
 - The fixture's first attempt ran all 126 cases in one process; the

@@ -15,7 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / 'work/rust-target'
-WASM = TARGET / 'wasm32-unknown-unknown/release/vectormagik_web.wasm'
+# Its own profile (kit/web/Cargo.toml): the published module alone pays for fat LTO.
+WASM = TARGET / 'wasm32-unknown-unknown/wasm-publish/vectormagik_web.wasm'
 
 
 def main():
@@ -23,7 +24,7 @@ def main():
     parser.add_argument('--site', required=True, help="the website's folder (its public/ gets engine/)")
     args = parser.parse_args()
     site = Path(args.site)
-    subprocess.run(['cargo', 'build', '--offline', '--release', '--lib',
+    subprocess.run(['cargo', 'build', '--offline', '--profile', 'wasm-publish', '--lib',
                     '--manifest-path', str(ROOT / 'kit/web/Cargo.toml'),
                     '--target', 'wasm32-unknown-unknown', '--target-dir', str(TARGET)], check=True)
     subprocess.run(['node', str(ROOT / 'kit/web/js/test.mjs'), str(WASM)], check=True)

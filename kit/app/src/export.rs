@@ -114,7 +114,10 @@ pub fn vector_bytes(
 ) -> Result<Vec<u8>, String> {
     let svg = apply_options(svg, options);
     match kind {
-        OutputKind::Svg => Ok(svg.into_bytes()),
+        // Dithered areas as pattern fills (`dither.rs`); the PDF, EPS, DXF
+        // and EMF writers find them for themselves, and PNG draws the
+        // squares.
+        OutputKind::Svg => Ok(crate::dither::patterned_svg(&svg).into_bytes()),
         OutputKind::Pdf | OutputKind::Ai => crate::pdf_eps::to_pdf(&svg),
         OutputKind::Eps => crate::pdf_eps::to_eps(&svg),
         OutputKind::Dxf => crate::dxf::to_dxf(&svg, options.dxf),

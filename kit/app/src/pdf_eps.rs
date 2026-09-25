@@ -18,8 +18,14 @@
 //! hold partial opacity and refuses it, as the Python exporter did; it is
 //! drawn on a white page like CairoSVG's.
 //!
+//! A dithered area (a shape's squares repeating a tile, `dither.rs`) is drawn
+//! as one rectangle filled with a tiling pattern of the tile: PDF's pattern
+//! type 1, PostScript's `makepattern`. Inside a translucent group, where a
+//! PDF pattern would be placed in the group's space, the squares are drawn.
+//!
 //! The same reading serves the other writers (`dxf.rs`, `emf.rs`): `page`
-//! gives every painted path as segments in page space with its paint.
+//! gives every painted path as segments in page space with its paint, the
+//! squares as they are.
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -29,6 +35,7 @@ pub fn to_pdf(svg: &str) -> Result<Vec<u8>, String> {
     let (scale, tx, ty) = drawing.page_scale();
     let mut pdf = Pdf {
         view: drawing.view,
+        page_matrix: drawing.page_matrix(),
         page: [
             -tx / scale,
             -ty / scale,
@@ -598,7 +605,7 @@ fn ops_text(segments: &[Segment]) -> String {
 
 /// SVG path data as segments in user space: every command made absolute,
 /// `H` and `V` as lines, quadratics raised to cubics.
-fn path_segments(d: &str) -> Result<Vec<Segment>, String> {
+pub(crate) fn path_segments(d: &str) -> Result<Vec<Segment>, String> {
     let mut tokens = PathTokens { rest: d };
     let mut out = Vec::new();
     let (mut current, mut start) = ((0., 0.), (0., 0.));
@@ -800,6 +807,13 @@ struct Pdf {
     view: [f64; 4],
     /// The page in user space: x, y, width, height.
     page: [f64; 4],
+    /// User space onto the page, which a pattern's matrix starts from.
+    page_matrix: [f64; 6],
+    /// Each tiling pattern `/P<i>`, object `6 + forms + i`: its dictionary
+    /// entries and its content.
+    patterns: Vec<(String, String)>,
+    /// Translucent groups being written around the current item.
+    in_form: usize,
 }
 
 impl Pdf {
@@ -829,14 +843,27 @@ impl Pdf {
             match item {
                 Item::Shape {
                     path,
+                    segments,
                     style,
                     opacity,
-                    ..
                 } => {
                     let Some(op) = paint(style) else {
                         continue;
                     };
-                    if op.starts_with('B') && *opacity < 1. {
+                    let dithered = match (style.fill, op, self.in_form) {
+                        (Some(fill), "f" | "f*", 0) => {
+                            crate::dither::split(segments).map(|found| (fill, found))
+                        }
+                        _ => None,
+                    };
+                    if let Some((fill, (rest, runs))) = dithered {
+                        if !rest.is_empty() {
+                            self.shape(&ops_text(&rest), style, *opacity, op, out);
+                        }
+                        for run in &runs {
+                            self.pattern_fill(run, fill, *opacity * style.fill_opacity, outer, out);
+                        }
+                    } else if op.starts_with('B') && *opacity < 1. {
                         // Fill and stroke overlap: blended once, as a group.
                         let mut inner = String::new();
                         self.shape(path, style, 1., op, &mut inner);
@@ -856,7 +883,10 @@ impl Pdf {
                         let _ = writeln!(inner, "1 0 0 1 {} {} cm", num(dx), num(dy));
                     }
                     let within = (outer.0 + dx, outer.1 + dy);
+                    let form = usize::from(*opacity < 1.);
+                    self.in_form += form;
                     self.items(items, within, &mut inner);
+                    self.in_form -= form;
                     if *opacity < 1. {
                         self.group(inner, *opacity, out);
                     } else {
@@ -878,6 +908,61 @@ impl Pdf {
                     }
                 }
             }
+        }
+    }
+
+    /// `run` drawn as its rectangle filled with its tile in `fill`, at
+    /// `alpha`. The rectangle is written in the current user space (`outer`
+    /// the group translations in it); a pattern's matrix maps its tile onto
+    /// the page itself.
+    fn pattern_fill(
+        &mut self,
+        run: &crate::dither::Run,
+        fill: [u8; 3],
+        alpha: f64,
+        outer: Xy,
+        out: &mut String,
+    ) {
+        let [a, b, c, d, e, f] = self.page_matrix;
+        let (x, y) = (run.x + outer.0, run.y + outer.1);
+        let placed = [a, b, c, d, a * x + c * y + e, b * x + d * y + f];
+        let (tile_w, tile_h) = run.tile();
+        let mut cells = format!("{} rg\n", rgb(fill));
+        for &(i, j) in &run.inked {
+            let _ = writeln!(
+                cells,
+                "{} {} {} {} re",
+                num(i as f64 * run.side),
+                num(j as f64 * run.side),
+                num(run.side),
+                num(run.side)
+            );
+        }
+        cells.push_str("f\n");
+        let dictionary = format!(
+            " /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {w} {h}] \
+             /XStep {w} /YStep {h} /Matrix [{}] /Resources << >>",
+            matrix(&placed),
+            w = num(tile_w),
+            h = num(tile_h)
+        );
+        self.patterns.push((dictionary, cells));
+        let index = self.patterns.len() - 1;
+        if alpha < 1. {
+            out.push_str("q\n");
+            let state = self.state(alpha, 1.);
+            out.push_str(&state);
+        }
+        let _ = writeln!(
+            out,
+            "/Pattern cs /P{index} scn\n{} {} {} {} re\nf",
+            num(run.x),
+            num(run.y),
+            num(run.width),
+            num(run.height)
+        );
+        if alpha < 1. {
+            out.push_str("Q\n");
         }
     }
 
@@ -935,6 +1020,13 @@ impl Pdf {
             }
             resources.push_str(" >>");
         }
+        if !self.patterns.is_empty() {
+            resources.push_str(" /Pattern <<");
+            for i in 0..self.patterns.len() {
+                let _ = write!(resources, " /P{i} {} 0 R", 6 + self.forms.len() + i);
+            }
+            resources.push_str(" >>");
+        }
         resources.push_str(" >>");
         let group = if self.states.is_empty() {
             ""
@@ -960,6 +1052,9 @@ impl Pdf {
                 ),
                 form,
             ));
+        }
+        for (dictionary, cells) in &self.patterns {
+            objects.push(stream(dictionary, cells));
         }
         let mut out = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n".to_vec();
         let mut offsets = Vec::with_capacity(objects.len());
@@ -1003,11 +1098,31 @@ fn stream(extra: &str, data: &str) -> Vec<u8> {
 fn eps_items(items: &[Item], out: &mut String) {
     for item in items {
         match item {
-            Item::Shape { path, style, .. } => {
+            Item::Shape {
+                path,
+                segments,
+                style,
+                ..
+            } => {
                 let Some(op) = paint(style) else {
                     continue;
                 };
                 let fill_op = if style.evenodd { "f*" } else { "f" };
+                let dithered = match (style.fill, op) {
+                    (Some(fill), "f" | "f*") => {
+                        crate::dither::split(segments).map(|found| (fill, found))
+                    }
+                    _ => None,
+                };
+                if let Some((fill, (rest, runs))) = dithered {
+                    if !rest.is_empty() {
+                        let _ = write!(out, "{} rg\n{}{fill_op}\n", rgb(fill), ops_text(&rest));
+                    }
+                    for run in &runs {
+                        eps_pattern_fill(run, fill, out);
+                    }
+                    continue;
+                }
                 match (style.fill, style.stroke, op) {
                     (Some(fill), Some(stroke), "B" | "B*") => {
                         let _ = write!(
@@ -1037,6 +1152,37 @@ fn eps_items(items: &[Item], out: &mut String) {
             }
         }
     }
+}
+
+/// `run` as PostScript: its tile made a pattern at its corner in the current
+/// user space, and its rectangle filled with it.
+fn eps_pattern_fill(run: &crate::dither::Run, fill: [u8; 3], out: &mut String) {
+    let (tile_w, tile_h) = run.tile();
+    let s = num(run.side);
+    let mut cells = String::new();
+    for &(i, j) in &run.inked {
+        let _ = write!(
+            cells,
+            " {} {} {s} {s} rectfill",
+            num(i as f64 * run.side),
+            num(j as f64 * run.side)
+        );
+    }
+    let _ = write!(
+        out,
+        "q\n<< /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {w} {h}] /XStep {w} /YStep {h}\n\
+         /PaintProc {{ pop {} setrgbcolor{cells} }} >>\n[1 0 0 1 {} {}] makepattern setpattern\n\
+         {} {} {} {} re f\nQ\n",
+        rgb(fill),
+        num(run.x),
+        num(run.y),
+        num(run.x),
+        num(run.y),
+        num(run.width),
+        num(run.height),
+        w = num(tile_w),
+        h = num(tile_h)
+    );
 }
 
 #[cfg(test)]

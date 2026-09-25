@@ -2,7 +2,7 @@
 # Integration tests share ONE executable (tests/integration.rs, see its header).
 autotests = false
 name = "vector-magic-rebuild"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
 publish = false
@@ -52,6 +52,11 @@ base64 = { version = "0.23", optional = true }
 serde_json = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
 ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
+# On Linux the window needs a display server's backend, and eframe is built
+# without its defaults: the Linux build adds `--features
+# eframe/x11,eframe/wayland` (publish/release.py). They are not declared here,
+# because Cargo locks every package a declared feature could reach (wgpu among
+# them) and this repository's builds stay offline.
 
 [[example]]
 name = "render_svg"

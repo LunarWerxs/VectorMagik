@@ -1,6 +1,6 @@
 [package]
 name = "vectormagik-web"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
 description = "VectorMagik in the browser: the desktop app as WebAssembly, drawn on a canvas"
@@ -16,6 +16,12 @@ egui = { version = "=0.33.3", default-features = false, features = ["default_fon
 
 [profile.release]
 opt-level = 3
+panic = "abort"
+
+# The module the website serves, built by publish_engine.py: fat LTO and one codegen unit make it
+# smaller, and cost minutes on every build, so the gate's native tests and its wasm check build
+# plain release (a green gate took 211 to 315 s in its web step with them, September 24, 2026).
+[profile.wasm-publish]
+inherits = "release"
 lto = true
 codegen-units = 1
-panic = "abort"

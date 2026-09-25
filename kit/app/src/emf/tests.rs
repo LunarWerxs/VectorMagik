@@ -206,6 +206,93 @@ fn coordinates_beyond_sixteen_bits_take_the_wide_records() {
 }
 
 #[test]
+fn a_dithered_area_is_one_polygon_record_of_its_squares() {
+    // A red checker of 1 pt squares, 9 by 7 cells from (2, 3), and one more
+    // red square alone: 16 logical units to the point.
+    let square = |x: usize, y: usize| {
+        format!(
+            " M {x} {y} L {} {y} L {} {} L {x} {} Z",
+            x + 1,
+            x + 1,
+            y + 1,
+            y + 1
+        )
+    };
+    let checker: Vec<(usize, usize)> = (0..7)
+        .flat_map(|y| (0..9).map(move |x| (x, y)))
+        .filter(|(x, y)| (x + y) % 2 == 0)
+        .map(|(x, y)| (x + 2, y + 3))
+        .collect();
+    let d: String = checker
+        .iter()
+        .chain([&(30, 15)])
+        .map(|&(x, y)| square(x, y))
+        .collect();
+    let svg = format!("<svg width=\"40pt\" height=\"20pt\" viewBox=\"0 0 40 20\"><path fill=\"#ff0000\" d=\"{d}\" /></svg>");
+    let records = records(&to_emf(&svg).unwrap());
+    let kinds: Vec<u32> = records.iter().map(|r| r.0).collect();
+    // EMR_POLYPOLYGON16 is 0x5B in MS-EMF 2.1.1; 0x5A, the number first
+    // written here, is EMR_POLYPOLYLINE16, which GDI strokes with the null
+    // pen: nothing was drawn (September 25, 2026).
+    assert_eq!(EMR_POLYPOLYGON16, 0x5B);
+    let at = kinds.iter().position(|k| *k == EMR_POLYPOLYGON16).unwrap();
+    // The lone square is the path, then the checker, with the path's red
+    // brush and no pen.
+    assert_eq!(
+        kinds[kinds.iter().position(|k| *k == EMR_BEGINPATH).unwrap()..=at],
+        [
+            EMR_BEGINPATH,
+            EMR_MOVETOEX,
+            EMR_POLYLINETO16,
+            EMR_CLOSEFIGURE,
+            EMR_ENDPATH,
+            EMR_FILLPATH,
+            EMR_POLYPOLYGON16
+        ]
+    );
+    assert_eq!(kinds.iter().filter(|k| **k == EMR_BEGINPATH).count(), 1);
+    assert_eq!(
+        words(
+            &records[kinds
+                .iter()
+                .position(|k| *k == EMR_CREATEBRUSHINDIRECT)
+                .unwrap()]
+            .1
+        )[2],
+        0xff
+    );
+    let data = &records[at].1;
+    let word = |i: usize| words(&data[16 + 4 * i..20 + 4 * i])[0];
+    let (polygons, count) = (word(0) as usize, word(1) as usize);
+    assert_eq!((polygons, count), (checker.len(), 4 * checker.len()));
+    assert!((0..polygons).all(|k| word(2 + k) == 4));
+    let values: Vec<i64> = data[24 + 4 * polygons..]
+        .chunks(2)
+        .map(|c| i64::from(i16::from_le_bytes(c.try_into().unwrap())))
+        .collect();
+    assert_eq!(values.len(), 2 * count);
+    let mut drawn: Vec<Vec<(i64, i64)>> = values
+        .chunks(8)
+        .map(|v| {
+            let mut corners: Vec<(i64, i64)> = v.chunks(2).map(|p| (p[0], p[1])).collect();
+            corners.sort_unstable();
+            corners
+        })
+        .collect();
+    drawn.sort();
+    let mut expected: Vec<Vec<(i64, i64)>> = checker
+        .iter()
+        .map(|&(x, y)| {
+            let (x, y) = (16 * x as i64, 16 * y as i64);
+            vec![(x, y), (x, y + 16), (x + 16, y), (x + 16, y + 16)]
+        })
+        .collect();
+    expected.sort();
+    assert_eq!(drawn, expected);
+    assert_eq!(words(&data[..16]), [32, 48, 176, 160]);
+}
+
+#[test]
 fn transparency_and_unreachable_coordinates_are_refused() {
     let translucent = SVG.replace("fill=\"#ff0000\" d=", "fill=\"#ff0000\" opacity=\"0.5\" d=");
     assert!(to_emf(&translucent).unwrap_err().contains("transparency"));

@@ -136,7 +136,9 @@ pub mod icon {
     pub const CAMERA: &str = "\u{1F4F7}";
     pub const CLOSE: &str = "\u{1F5D9}";
     pub const SETTINGS: &str = "\u{2699}";
-    pub const SLIDERS: &str = "\u{2637}";
+    // A trigram in egui's icon font on every system (U+2637 is in no font the
+    // app loads, Segoe UI included, and drew as a box).
+    pub const SLIDERS: &str = "\u{2630}";
     pub const AUTO: &str = "\u{26A1}";
     pub const VIEW: &str = "\u{1F441}";
     pub const NODES: &str = "\u{25A3}";
@@ -157,7 +159,7 @@ pub mod icon {
     pub const OPEN_CARD: &str = "\u{25BC}";
     pub const CLOSED_CARD: &str = "\u{25BA}";
     pub const APPEARANCE: &str = "\u{1F313}";
-    pub const ALL: [&str; 27] = [
+    pub const ALL: [&str; 28] = [
         OPEN,
         LOAD,
         CONVERT,
@@ -165,6 +167,7 @@ pub mod icon {
         CAMERA,
         CLOSE,
         SETTINGS,
+        SLIDERS,
         AUTO,
         VIEW,
         NODES,
@@ -401,10 +404,6 @@ impl Format {
         }
     }
     /// The position in the save dialog's filter list.
-    #[cfg_attr(
-        not(windows),
-        allow(dead_code, reason = "only the Windows system dialogs use it")
-    )]
     fn filter_index(self) -> u32 {
         Format::ALL
             .iter()

@@ -20,8 +20,10 @@
 use std::collections::BTreeMap;
 pub mod caps;
 pub mod clock;
+pub mod depixel;
 pub mod fitting;
 pub mod geometry;
+pub mod glyphs;
 pub mod median_fills;
 pub mod nodes;
 pub mod palette_fills;

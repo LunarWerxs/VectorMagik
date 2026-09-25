@@ -49,6 +49,32 @@ pub struct StrokeStats {
     pub inked: usize,
 }
 
+/// The direction a thin region's pixels take from `back`, as a unit vector:
+/// each pixel's step weighted by its length, so the most inked count most.
+/// A thin region's pixels are blends of one ink over the background, so they
+/// lie on the line from it to the ink; the engine's fill is the mean its
+/// colour model gave the region, and a pale ink on a dark field came out grey
+/// or in a neighbour's hue (the mint and lilac small print of
+/// shape-text-small-dark drawn grey and white, September 25, 2026), so the
+/// ink's hue is read from the pixels. None when they give no direction.
+pub(crate) fn ink_way(
+    inside: &[usize],
+    colour: impl Fn(usize) -> [f64; 3],
+    back: [f64; 3],
+) -> Option<[f64; 3]> {
+    let mut sum = [0.; 3];
+    for &p in inside {
+        let c = colour(p);
+        let step = [0, 1, 2].map(|k| c[k] - back[k]);
+        let length = step.iter().map(|v| v * v).sum::<f64>().sqrt();
+        for k in 0..3 {
+            sum[k] += step[k] * length;
+        }
+    }
+    let norm = sum.iter().map(|v| v * v).sum::<f64>().sqrt();
+    (norm > 1e-9).then(|| sum.map(|v| v / norm))
+}
+
 /// `svg` (an engine document of `source`) with its thin strokes drawn in
 /// their ink at their width.
 pub fn ink_strokes(svg: &str, source: &Raster) -> Result<(String, StrokeStats), String> {
@@ -115,7 +141,16 @@ pub fn ink_strokes(svg: &str, source: &Raster) -> Result<(String, StrokeStats), 
             })
             .count() as f64
             >= 0.9 * ring.len() as f64;
-        let span = [fill[0] - back[0], fill[1] - back[1], fill[2] - back[2]];
+        // Along the ink's hue as far as the fill reaches on it: the inset
+        // below weighs the fill's darkness, which covers the whole width.
+        let to_fill = [0, 1, 2].map(|k| fill[k] - back[k]);
+        let span = ink_way(&inside, colour, back)
+            .map(|way| {
+                let reach: f64 = (0..3).map(|k| to_fill[k] * way[k]).sum();
+                way.map(|v| v * reach)
+            })
+            .filter(|s| s.iter().any(|v| v.abs() > 1e-9))
+            .unwrap_or(to_fill);
         let contrast = span.iter().map(|v| v.abs()).fold(0., f64::max);
         if !spread_ok || contrast < MIN_CONTRAST {
             continue;

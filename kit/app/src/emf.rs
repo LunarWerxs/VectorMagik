@@ -23,6 +23,18 @@
 //!
 //! GDI paints without opacity, so a drawing with partial transparency is
 //! refused, as EPS refuses it.
+//!
+//! Dithered areas (September 25, 2026). Where an unstroked filled path's
+//! squares repeat a tile (`dither.rs`, as the SVG, PDF and EPS find them),
+//! the area's squares are one `EMR_POLYPOLYGON16` after the rest of the
+//! path: four corners each, where a path spends a move, a line record and a
+//! close on every square. EMF has no pattern that scales with the drawing:
+//! a GDI pattern brush tiles in the output device's pixels, so its cells
+//! come out the size of a screen or printer pixel, and it paints every cell
+//! of its tile, so the cells between the dither's squares would be painted
+//! too; a bitmap stretched over the area would draw the same pixels but
+//! turn the squares into a picture.
+use crate::dither::Run;
 use crate::pdf_eps::{Page, Segment, Shape, Xy};
 
 /// Logical units per point.
@@ -35,6 +47,7 @@ const DEVICE_MILLIMETRES: [i32; 2] = [508, 381];
 
 const EMR_HEADER: u32 = 1;
 const EMR_POLYBEZIERTO: u32 = 5;
+const EMR_POLYPOLYGON: u32 = 8;
 const EMR_POLYLINETO: u32 = 6;
 const EMR_SETWINDOWEXTEX: u32 = 9;
 const EMR_SETWINDOWORGEX: u32 = 10;
@@ -58,6 +71,7 @@ const EMR_STROKEANDFILLPATH: u32 = 63;
 const EMR_STROKEPATH: u32 = 64;
 const EMR_POLYBEZIERTO16: u32 = 88;
 const EMR_POLYLINETO16: u32 = 89;
+const EMR_POLYPOLYGON16: u32 = 91;
 const EMR_EXTCREATEPEN: u32 = 95;
 
 const MM_ANISOTROPIC: u32 = 8;
@@ -94,7 +108,23 @@ pub fn to_emf(svg: &str) -> Result<Vec<u8>, String> {
     // SVG's miter limit (GDI's own is 10).
     emf.record(EMR_SETMITERLIMIT, &[4]);
     for shape in &page.shapes {
-        emf.shape(shape)?;
+        let dithered = match (shape.fill, shape.stroke) {
+            (Some(fill), None) => crate::dither::split(&shape.segments).map(|found| (fill, found)),
+            _ => None,
+        };
+        let Some((fill, (rest, runs))) = dithered else {
+            emf.shape(shape)?;
+            continue;
+        };
+        if !rest.is_empty() {
+            emf.shape(&Shape {
+                segments: rest,
+                ..shape.clone()
+            })?;
+        }
+        for run in &runs {
+            emf.squares(run, fill, shape.evenodd)?;
+        }
     }
     emf.record(EMR_SELECTOBJECT, &[WHITE_BRUSH]);
     emf.record(EMR_SELECTOBJECT, &[BLACK_PEN]);
@@ -157,10 +187,23 @@ impl Emf {
     }
 
     /// A poly record: its bounds, count and points, 16-bit when they fit.
-    fn poly(&mut self, short: u32, long: u32, points: &[[i32; 2]]) -> Result<(), String> {
+    /// With `rings`, a polypolygon's: every `rings` points one polygon.
+    fn poly(
+        &mut self,
+        short: u32,
+        long: u32,
+        points: &[[i32; 2]],
+        rings: Option<usize>,
+    ) -> Result<(), String> {
         let fits = points.iter().flatten().all(|v| i16::try_from(*v).is_ok());
         let per_point = if fits { 4 } else { 8 };
-        let size = u32::try_from(28 + per_point * points.len())
+        let polygons = rings.map_or(0, |n| points.len() / n);
+        let head = if rings.is_some() {
+            32 + 4 * polygons
+        } else {
+            28
+        };
+        let size = u32::try_from(head + per_point * points.len())
             .map_err(|_| "A path is too long for an EMF record")?;
         self.body
             .extend_from_slice(&(if fits { short } else { long }).to_le_bytes());
@@ -168,8 +211,18 @@ impl Emf {
         for v in bounds(points) {
             self.body.extend_from_slice(&v.to_le_bytes());
         }
-        self.body
-            .extend_from_slice(&(points.len() as u32).to_le_bytes());
+        if let Some(n) = rings {
+            self.body
+                .extend_from_slice(&(polygons as u32).to_le_bytes());
+            self.body
+                .extend_from_slice(&(points.len() as u32).to_le_bytes());
+            for _ in 0..polygons {
+                self.body.extend_from_slice(&(n as u32).to_le_bytes());
+            }
+        } else {
+            self.body
+                .extend_from_slice(&(points.len() as u32).to_le_bytes());
+        }
         for v in points.iter().flatten() {
             if fits {
                 self.body.extend_from_slice(&(*v as i16).to_le_bytes());
@@ -179,6 +232,35 @@ impl Emf {
         }
         self.records += 1;
         Ok(())
+    }
+
+    /// A dithered area's squares, one polygon each in one record, filled
+    /// with `fill` and no pen: every cell of `run`'s rectangle whose cell of
+    /// the tile is inked.
+    fn squares(&mut self, run: &Run, fill: [u8; 3], evenodd: bool) -> Result<(), String> {
+        let mode = if evenodd { ALTERNATE } else { WINDING };
+        if self.fill_mode != mode {
+            self.record(EMR_SETPOLYFILLMODE, &[mode]);
+            self.fill_mode = mode;
+        }
+        self.select_brush(Some(fill));
+        self.select_pen(None);
+        let (px, py) = run.period;
+        let mut tile = vec![false; px * py];
+        for &(i, j) in &run.inked {
+            tile[j * px + i] = true;
+        }
+        let cells = |length: f64| (length / run.side).round() as usize;
+        let grid = |origin: f64, k: usize| logical(origin + k as f64 * run.side);
+        let mut corners = Vec::new();
+        for y in 0..cells(run.height) {
+            for x in (0..cells(run.width)).filter(|x| tile[(y % py) * px + x % px]) {
+                let (left, right) = (grid(run.x, x)?, grid(run.x, x + 1)?);
+                let (top, bottom) = (grid(run.y, y)?, grid(run.y, y + 1)?);
+                corners.extend([[left, top], [right, top], [right, bottom], [left, bottom]]);
+            }
+        }
+        self.poly(EMR_POLYPOLYGON16, EMR_POLYPOLYGON, &corners, Some(4))
     }
 
     /// Selects a solid brush of `fill`, or the null brush.
@@ -319,8 +401,12 @@ impl Emf {
                     }
                     match (cubic, points.len()) {
                         (false, 1) => self.record(EMR_LINETO, &points[0].map(|v| v as u32)),
-                        (false, _) => self.poly(EMR_POLYLINETO16, EMR_POLYLINETO, &points)?,
-                        (true, _) => self.poly(EMR_POLYBEZIERTO16, EMR_POLYBEZIERTO, &points)?,
+                        (false, _) => {
+                            self.poly(EMR_POLYLINETO16, EMR_POLYLINETO, &points, None)?;
+                        }
+                        (true, _) => {
+                            self.poly(EMR_POLYBEZIERTO16, EMR_POLYBEZIERTO, &points, None)?;
+                        }
                     }
                     all.extend(points);
                 }

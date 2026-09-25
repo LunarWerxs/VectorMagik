@@ -37,6 +37,19 @@
 //! interior joins and 4 at the ends) and each run of straight pieces an
 //! `LWPOLYLINE`, end to end along the outline; an outline of straight
 //! pieces alone is one closed or open `LWPOLYLINE`.
+//!
+//! Dithered areas (September 25, 2026). Where a filled path's squares repeat
+//! a tile (`dither.rs`, as the SVG, PDF and EPS find them), the tile is a
+//! block of its inked squares and the area AutoCAD's rectangular array of
+//! it: one `INSERT` with column and row counts ("MINSERT"). A rectangle ends
+//! where the repetition stops, not on a tile's edge, so the columns and rows
+//! it ends in are arrays of the part of the tile they hold. Exploded, the
+//! arrays are the same closed square outlines the path holds, in both
+//! versions (R12 has the counts too). A DXF has no fills, so a hatch, whose
+//! pattern is lines clipped to a boundary, would draw the squares' edges
+//! only as loose lines, and those on the boundary itself as the reader
+//! decides; the arrays keep every square an outline.
+use crate::dither::Run;
 use crate::export::DxfMode;
 use crate::pdf_eps::{Page, Segment, Xy};
 use std::collections::HashMap;
@@ -56,12 +69,11 @@ const MAX_VERTICES: usize = 10_000_000;
 /// The DXF of `svg`, its curves written as `mode` says.
 pub fn to_dxf(svg: &str, mode: DxfMode) -> Result<Vec<u8>, String> {
     let page = crate::pdf_eps::page(svg)?;
-    let (colours, outlines) = outlines(&page);
-    let layers: Vec<Layer> = colours.into_iter().map(Layer::of).collect();
+    let drawing = Drawing::of(&page);
     let text = match mode {
-        DxfMode::Splines => r2000(&page, &layers, &outlines),
-        DxfMode::FineLines => r12(&page, &layers, &outlines, FINE_TOLERANCE)?,
-        DxfMode::CoarseLines => r12(&page, &layers, &outlines, COARSE_TOLERANCE)?,
+        DxfMode::Splines => r2000(&page, &drawing),
+        DxfMode::FineLines => r12(&page, &drawing, FINE_TOLERANCE)?,
+        DxfMode::CoarseLines => r12(&page, &drawing, COARSE_TOLERANCE)?,
     };
     Ok(text.into_bytes())
 }
@@ -89,56 +101,202 @@ struct Outline {
     closed: bool,
 }
 
-/// The colours in order of first use and every outline of the page, y up.
-fn outlines(page: &Page) -> (Vec<[u8; 3]>, Vec<Outline>) {
-    let mut colours = Vec::new();
-    let mut layer_of: HashMap<[u8; 3], usize> = HashMap::new();
-    let mut out = Vec::new();
-    let flip = |p: Xy| (p.0, page.height - p.1);
-    for shape in &page.shapes {
-        let Some(colour) = shape.fill.or(shape.stroke) else {
-            continue;
-        };
-        let layer = *layer_of.entry(colour).or_insert_with(|| {
-            colours.push(colour);
-            colours.len() - 1
-        });
-        let filled = shape.fill.is_some();
-        let fresh = |start: Xy| Outline {
-            layer,
-            start,
-            pieces: Vec::new(),
-            closed: filled,
-        };
-        let mut current: Option<Outline> = None;
-        // Where a piece without a move before it starts: after a close, the
-        // subpath's start, as in SVG.
-        let mut at = flip((0., 0.));
-        for segment in &shape.segments {
-            let piece = match *segment {
-                Segment::Move(p) => {
-                    out.extend(current.take().filter(|o| !o.pieces.is_empty()));
-                    at = flip(p);
-                    current = Some(fresh(at));
-                    continue;
-                }
-                Segment::Close => {
-                    if let Some(mut outline) = current.take() {
-                        outline.closed = true;
-                        at = outline.start;
-                        out.extend(Some(outline).filter(|o| !o.pieces.is_empty()));
-                    }
-                    continue;
-                }
-                Segment::Line(p) => Piece::Line(flip(p)),
-                Segment::Cubic(a, b, p) => Piece::Cubic(flip(a), flip(b), flip(p)),
+/// What a file draws: a layer per colour, the outlines and arrays in paint
+/// order, and the blocks the arrays place.
+struct Drawing {
+    layers: Vec<Layer>,
+    items: Vec<Item>,
+    blocks: Vec<Block>,
+}
+
+enum Item {
+    Outline(Outline),
+    Array(Array),
+}
+
+/// Part of a dithered area's tile: the squares of its inked cells as closed
+/// outlines, its lower-left corner at the block's origin.
+struct Block {
+    name: String,
+    outlines: Vec<Outline>,
+}
+
+/// A block placed as AutoCAD's rectangular array: `columns` by `rows`
+/// copies `step` apart, the lower-left one at `at`.
+struct Array {
+    layer: usize,
+    block: usize,
+    at: Xy,
+    columns: usize,
+    rows: usize,
+    step: Xy,
+}
+
+impl Drawing {
+    /// The page's colours in order of first use and its outlines, y up; a
+    /// filled path's dithered areas as arrays of their tile. Only outlines
+    /// are written, so a path's stroke changes nothing here.
+    fn of(page: &Page) -> Self {
+        let mut colours = Vec::new();
+        let mut layer_of: HashMap<[u8; 3], usize> = HashMap::new();
+        let mut items = Vec::new();
+        let mut tiles = Tiles::default();
+        for shape in &page.shapes {
+            let Some(colour) = shape.fill.or(shape.stroke) else {
+                continue;
             };
-            current.get_or_insert_with(|| fresh(at)).pieces.push(piece);
-            at = piece.end();
+            let layer = *layer_of.entry(colour).or_insert_with(|| {
+                colours.push(colour);
+                colours.len() - 1
+            });
+            let filled = shape.fill.is_some();
+            let split = filled
+                .then(|| crate::dither::split(&shape.segments))
+                .flatten();
+            let segments = split.as_ref().map_or(&shape.segments[..], |s| &s.0[..]);
+            items.extend(
+                outlines(segments, layer, filled, page.height)
+                    .into_iter()
+                    .map(Item::Outline),
+            );
+            for run in split.iter().flat_map(|s| &s.1) {
+                tiles.place(run, layer, page.height, &mut items);
+            }
         }
-        out.extend(current.filter(|o| !o.pieces.is_empty()));
+        Self {
+            layers: colours.into_iter().map(Layer::of).collect(),
+            items,
+            blocks: tiles.blocks,
+        }
     }
-    (colours, out)
+}
+
+/// The outlines of one path's `segments` on `layer`, y up on a page
+/// `height` high.
+fn outlines(segments: &[Segment], layer: usize, filled: bool, height: f64) -> Vec<Outline> {
+    let flip = |p: Xy| (p.0, height - p.1);
+    let fresh = |start: Xy| Outline {
+        layer,
+        start,
+        pieces: Vec::new(),
+        closed: filled,
+    };
+    let mut out = Vec::new();
+    let mut current: Option<Outline> = None;
+    // Where a piece without a move before it starts: after a close, the
+    // subpath's start, as in SVG.
+    let mut at = flip((0., 0.));
+    for segment in segments {
+        let piece = match *segment {
+            Segment::Move(p) => {
+                out.extend(current.take().filter(|o| !o.pieces.is_empty()));
+                at = flip(p);
+                current = Some(fresh(at));
+                continue;
+            }
+            Segment::Close => {
+                if let Some(mut outline) = current.take() {
+                    outline.closed = true;
+                    at = outline.start;
+                    out.extend(Some(outline).filter(|o| !o.pieces.is_empty()));
+                }
+                continue;
+            }
+            Segment::Line(p) => Piece::Line(flip(p)),
+            Segment::Cubic(a, b, p) => Piece::Cubic(flip(a), flip(b), flip(p)),
+        };
+        current.get_or_insert_with(|| fresh(at)).pieces.push(piece);
+        at = piece.end();
+    }
+    out.extend(current.filter(|o| !o.pieces.is_empty()));
+    out
+}
+
+/// A block's layer, square side (its bits) and inked cells, each as its
+/// column and its row counted from the bottom.
+type TileKey = (usize, u64, Vec<(usize, usize)>);
+
+/// The blocks made so far, each made once for what it draws.
+#[derive(Default)]
+struct Tiles {
+    blocks: Vec<Block>,
+    known: HashMap<TileKey, usize>,
+}
+
+impl Tiles {
+    /// `run` (page space, y down) as arrays on `layer`: its whole tiles,
+    /// then the columns and the rows it ends in short of a whole tile, and
+    /// the corner where both meet, each an array of the part of the tile it
+    /// holds.
+    fn place(&mut self, run: &Run, layer: usize, height: f64, items: &mut Vec<Item>) {
+        let side = run.side;
+        let (px, py) = run.period;
+        let cells = |length: f64| (length / side).round() as usize;
+        let (w, h) = (cells(run.width), cells(run.height));
+        let (nx, ny) = (w / px, h / py);
+        let (rx, ry) = (w % px, h % py);
+        for (window, counts, offset) in [
+            ((px, py), (nx, ny), (0, 0)),
+            ((rx, py), (1, ny), (nx * px, 0)),
+            ((px, ry), (nx, 1), (0, ny * py)),
+            ((rx, ry), (1, 1), (nx * px, ny * py)),
+        ] {
+            // Row j of the tile, counted from its top, is row
+            // window.1 - 1 - j of the block, counted from its bottom.
+            let mut inked: Vec<(usize, usize)> = run
+                .inked
+                .iter()
+                .filter(|&&(i, j)| i < window.0 && j < window.1)
+                .map(|&(i, j)| (i, window.1 - 1 - j))
+                .collect();
+            if inked.is_empty() || counts.0 == 0 || counts.1 == 0 {
+                continue;
+            }
+            inked.sort_unstable();
+            let block = self.block((layer, side.to_bits(), inked));
+            let bottom = run.y + (offset.1 + counts.1 * window.1) as f64 * side;
+            items.push(Item::Array(Array {
+                layer,
+                block,
+                at: (run.x + offset.0 as f64 * side, height - bottom),
+                columns: counts.0,
+                rows: counts.1,
+                step: (window.0 as f64 * side, window.1 as f64 * side),
+            }));
+        }
+    }
+
+    /// The block that draws `key`'s squares, made when it is new.
+    fn block(&mut self, key: TileKey) -> usize {
+        if let Some(&index) = self.known.get(&key) {
+            return index;
+        }
+        let (layer, side) = (key.0, f64::from_bits(key.1));
+        let outlines = key
+            .2
+            .iter()
+            .map(|&(i, j)| {
+                let (left, right) = (i as f64 * side, (i + 1) as f64 * side);
+                let (bottom, top) = (j as f64 * side, (j + 1) as f64 * side);
+                Outline {
+                    layer,
+                    start: (left, top),
+                    pieces: vec![
+                        Piece::Line((right, top)),
+                        Piece::Line((right, bottom)),
+                        Piece::Line((left, bottom)),
+                    ],
+                    closed: true,
+                }
+            })
+            .collect();
+        self.blocks.push(Block {
+            name: format!("VM_DITHER_{}", self.blocks.len() + 1),
+            outlines,
+        });
+        self.known.insert(key, self.blocks.len() - 1);
+        self.blocks.len() - 1
+    }
 }
 
 /// A colour's layer: its name, nearest colour index and true colour.
@@ -190,6 +348,25 @@ impl Dxf {
         self.pair(62, layer.index);
         if true_colour {
             self.pair(420, layer.colour);
+        }
+    }
+
+    /// An `INSERT`'s block, place and array after its head; a count of one
+    /// and its spacing are left to their defaults.
+    fn array(&mut self, array: &Array, blocks: &[Block]) {
+        self.pair(2, &blocks[array.block].name);
+        self.xyz(10, array.at);
+        if array.columns > 1 {
+            self.pair(70, array.columns);
+        }
+        if array.rows > 1 {
+            self.pair(71, array.rows);
+        }
+        if array.columns > 1 {
+            self.pair(44, num(array.step.0));
+        }
+        if array.rows > 1 {
+            self.pair(45, num(array.step.1));
         }
     }
 }
@@ -350,13 +527,36 @@ fn extents(dxf: &mut Dxf, page: &Page) {
     dxf.xy(10, (page.width, page.height));
 }
 
-/// The R12 file of the line modes.
-fn r12(
-    page: &Page,
-    layers: &[Layer],
-    outlines: &[Outline],
+/// One outline as an R12 `POLYLINE` within `tolerance` of its curves.
+fn polyline12(
+    dxf: &mut Dxf,
+    layer: &Layer,
+    outline: &Outline,
     tolerance: f64,
-) -> Result<String, String> {
+    budget: &mut usize,
+) -> Result<(), String> {
+    let points = flattened(outline, tolerance, budget)?;
+    if points.len() < 2 {
+        return Ok(());
+    }
+    dxf.pair(0, "POLYLINE");
+    dxf.paint(layer, false);
+    dxf.pair(66, 1);
+    dxf.xyz(10, (0., 0.));
+    dxf.pair(70, u8::from(outline.closed));
+    for p in points {
+        dxf.pair(0, "VERTEX");
+        dxf.pair(8, &layer.name);
+        dxf.xyz(10, p);
+    }
+    dxf.pair(0, "SEQEND");
+    dxf.pair(8, &layer.name);
+    Ok(())
+}
+
+/// The R12 file of the line modes.
+fn r12(page: &Page, drawing: &Drawing, tolerance: f64) -> Result<String, String> {
+    let layers = &drawing.layers;
     let mut dxf = Dxf::default();
     dxf.pair(0, "SECTION");
     dxf.pair(2, "HEADER");
@@ -389,30 +589,46 @@ fn r12(
     }
     dxf.pair(0, "ENDTAB");
     dxf.pair(0, "ENDSEC");
+    let mut budget = MAX_VERTICES;
     dxf.pair(0, "SECTION");
     dxf.pair(2, "BLOCKS");
+    for block in &drawing.blocks {
+        dxf.pair(0, "BLOCK");
+        dxf.pair(8, "0");
+        dxf.pair(2, &block.name);
+        dxf.pair(70, 0);
+        dxf.xyz(10, (0., 0.));
+        dxf.pair(3, &block.name);
+        for outline in &block.outlines {
+            polyline12(
+                &mut dxf,
+                &layers[outline.layer],
+                outline,
+                tolerance,
+                &mut budget,
+            )?;
+        }
+        dxf.pair(0, "ENDBLK");
+        dxf.pair(8, "0");
+    }
     dxf.pair(0, "ENDSEC");
     dxf.pair(0, "SECTION");
     dxf.pair(2, "ENTITIES");
-    let mut budget = MAX_VERTICES;
-    for outline in outlines {
-        let points = flattened(outline, tolerance, &mut budget)?;
-        if points.len() < 2 {
-            continue;
+    for item in &drawing.items {
+        match item {
+            Item::Outline(outline) => polyline12(
+                &mut dxf,
+                &layers[outline.layer],
+                outline,
+                tolerance,
+                &mut budget,
+            )?,
+            Item::Array(array) => {
+                dxf.pair(0, "INSERT");
+                dxf.paint(&layers[array.layer], false);
+                dxf.array(array, &drawing.blocks);
+            }
         }
-        let layer = &layers[outline.layer];
-        dxf.pair(0, "POLYLINE");
-        dxf.paint(layer, false);
-        dxf.pair(66, 1);
-        dxf.xyz(10, (0., 0.));
-        dxf.pair(70, u8::from(outline.closed));
-        for p in points {
-            dxf.pair(0, "VERTEX");
-            dxf.pair(8, &layer.name);
-            dxf.xyz(10, p);
-        }
-        dxf.pair(0, "SEQEND");
-        dxf.pair(8, &layer.name);
     }
     dxf.pair(0, "ENDSEC");
     dxf.pair(0, "EOF");
@@ -451,7 +667,8 @@ fn entry(dxf: &mut Dxf, kind: &str, handle: &str, owner: &str, class: &str, name
 }
 
 /// The R2000 file of the spline mode.
-fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
+fn r2000(page: &Page, drawing: &Drawing) -> String {
+    let layers = &drawing.layers;
     let mut h = Handles(0);
     let (vport, ltype, layer, style, view) = (h.next(), h.next(), h.next(), h.next(), h.next());
     let (ucs, appid, dimstyle, records) = (h.next(), h.next(), h.next(), h.next());
@@ -525,8 +742,14 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     );
     dxf.pair(0, "ENDTAB");
     let (model, paper) = (h.next(), h.next());
-    table(&mut dxf, "BLOCK_RECORD", &records, 2);
-    for (handle, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
+    let spaces = [(model.clone(), "*Model_Space"), (paper, "*Paper_Space")];
+    let tiles: Vec<(String, &str)> = drawing
+        .blocks
+        .iter()
+        .map(|b| (h.next(), b.name.as_str()))
+        .collect();
+    table(&mut dxf, "BLOCK_RECORD", &records, 2 + tiles.len());
+    for (handle, name) in spaces.iter().chain(&tiles) {
         dxf.pair(0, "BLOCK_RECORD");
         dxf.pair(5, handle);
         dxf.pair(330, &records);
@@ -538,8 +761,8 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     dxf.pair(0, "ENDSEC");
     dxf.pair(0, "SECTION");
     dxf.pair(2, "BLOCKS");
-    for (owner, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
-        let paper_space = name == "*Paper_Space";
+    for (k, (owner, name)) in spaces.iter().chain(&tiles).enumerate() {
+        let paper_space = *name == "*Paper_Space";
         dxf.pair(0, "BLOCK");
         dxf.pair(5, h.next());
         dxf.pair(330, owner);
@@ -554,6 +777,12 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
         dxf.xyz(10, (0., 0.));
         dxf.pair(3, name);
         dxf.pair(1, "");
+        for outline in k
+            .checked_sub(spaces.len())
+            .map_or(&[][..], |tile| &drawing.blocks[tile].outlines)
+        {
+            spline_outline(&mut dxf, &mut h, owner, &layers[outline.layer], outline);
+        }
         dxf.pair(0, "ENDBLK");
         dxf.pair(5, h.next());
         dxf.pair(330, owner);
@@ -567,8 +796,23 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     dxf.pair(0, "ENDSEC");
     dxf.pair(0, "SECTION");
     dxf.pair(2, "ENTITIES");
-    for outline in outlines {
-        spline_outline(&mut dxf, &mut h, &model, &layers[outline.layer], outline);
+    for item in &drawing.items {
+        match item {
+            Item::Outline(outline) => {
+                spline_outline(&mut dxf, &mut h, &model, &layers[outline.layer], outline);
+            }
+            Item::Array(array) => {
+                // AutoCAD's subclass for an insert with more than one copy.
+                let class = if array.columns > 1 || array.rows > 1 {
+                    "AcDbMInsertBlock"
+                } else {
+                    "AcDbBlockReference"
+                };
+                let layer = &layers[array.layer];
+                entity_head(&mut dxf, &mut h, "INSERT", &model, layer, class);
+                dxf.array(array, &drawing.blocks);
+            }
+        }
     }
     dxf.pair(0, "ENDSEC");
     let (root, groups) = (h.next(), h.next());
@@ -617,6 +861,23 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     head.text + &dxf.text
 }
 
+/// An R2000 entity's head: its kind, handle, owner, paint and class.
+fn entity_head(
+    dxf: &mut Dxf,
+    h: &mut Handles,
+    kind: &str,
+    owner: &str,
+    layer: &Layer,
+    class: &str,
+) {
+    dxf.pair(0, kind);
+    dxf.pair(5, h.next());
+    dxf.pair(330, owner);
+    dxf.pair(100, "AcDbEntity");
+    dxf.paint(layer, true);
+    dxf.pair(100, class);
+}
+
 /// One outline as the spline mode writes it: an `LWPOLYLINE` alone when it
 /// is straight throughout, else runs of cubics as `SPLINE`s and runs of
 /// lines as open `LWPOLYLINE`s, end to end, a closed outline's closing edge
@@ -625,12 +886,7 @@ fn spline_outline(dxf: &mut Dxf, h: &mut Handles, owner: &str, layer: &Layer, ou
     let mut pieces = outline.pieces.clone();
     let end = pieces.last().map_or(outline.start, |p| p.end());
     let head = |dxf: &mut Dxf, h: &mut Handles, kind: &str, class: &str| {
-        dxf.pair(0, kind);
-        dxf.pair(5, h.next());
-        dxf.pair(330, owner);
-        dxf.pair(100, "AcDbEntity");
-        dxf.paint(layer, true);
-        dxf.pair(100, class);
+        entity_head(dxf, h, kind, owner, layer, class);
     };
     let polyline = |dxf: &mut Dxf, h: &mut Handles, points: &[Xy], closed: bool| {
         head(dxf, h, "LWPOLYLINE", "AcDbPolyline");

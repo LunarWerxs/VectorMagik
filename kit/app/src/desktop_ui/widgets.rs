@@ -888,6 +888,18 @@ pub(super) fn install_fonts(ctx: &egui::Context) -> FontFamily {
         .cloned()
         .unwrap_or_default();
     fallbacks.sort_by_key(|name| name == "NotoEmoji-Regular");
+    // Without the Windows font (Mac, Linux, a browser tab) egui's text and
+    // icon fonts lack the card arrows and the arrow in text; its monospace
+    // font has them, so it comes last.
+    if let Some(mono) = fonts
+        .families
+        .get(&FontFamily::Monospace)
+        .and_then(|f| f.first())
+    {
+        if !fallbacks.contains(mono) {
+            fallbacks.push(mono.clone());
+        }
+    }
     let mut family = Vec::new();
     if regular {
         family.push("ui-regular".to_owned());
@@ -1113,7 +1125,99 @@ pub(super) fn dialog(save: bool, name: &str, png: bool, format: Format) -> Optio
     }
     #[cfg(not(windows))]
     {
-        let _ = (save, name, png, format);
-        None
+        // macOS asks AppleScript's chooser; elsewhere zenity (GNOME and most
+        // desktops), else kdialog (KDE). The saved format follows the name's
+        // extension, which the Windows dialog's filter sets.
+        let extension = if png { "png" } else { format.extension() };
+        let default = format!("{name}.{extension}");
+        let path = unix_dialog(save, &default)?;
+        if !save {
+            return Some((path, 1));
+        }
+        let typed = std::path::Path::new(&path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        let known = typed.and_then(|e| Format::ALL.iter().position(|f| f.extension() == e));
+        match known {
+            Some(i) if !png => Some((path, i as u32 + 1)),
+            Some(_) => Some((path, 1)),
+            None => Some((format!("{path}.{extension}"), format.filter_index())),
+        }
     }
+}
+
+/// The path a system chooser returns (`save`: a new file named `default`
+/// to start with), or None when it is cancelled or no chooser is installed.
+#[cfg(not(windows))]
+fn unix_dialog(save: bool, default: &str) -> Option<String> {
+    let patterns = format!("{OPEN_FILTER};{IMPORT_FILTER}").replace(';', " ");
+    let choosers: Vec<(&str, Vec<String>)> = if cfg!(target_os = "macos") {
+        let script = if save {
+            "on run argv\nPOSIX path of (choose file name with prompt \"Save as\" default name (item 1 of argv))\nend run"
+        } else {
+            "on run argv\nPOSIX path of (choose file with prompt \"Open a picture or a vector file\")\nend run"
+        };
+        vec![(
+            "osascript",
+            vec!["-e".into(), script.into(), default.into()],
+        )]
+    } else if save {
+        vec![
+            (
+                "zenity",
+                vec![
+                    "--file-selection".into(),
+                    "--save".into(),
+                    "--title=Save as".into(),
+                    format!("--filename={default}"),
+                ],
+            ),
+            ("kdialog", vec!["--getsavefilename".into(), default.into()]),
+        ]
+    } else {
+        vec![
+            (
+                "zenity",
+                vec![
+                    "--file-selection".into(),
+                    "--title=Open a picture or a vector file".into(),
+                    format!("--file-filter=Pictures and vector files | {patterns}"),
+                    "--file-filter=All files | *".into(),
+                ],
+            ),
+            (
+                "kdialog",
+                vec![
+                    "--getopenfilename".into(),
+                    ".".into(),
+                    format!("{patterns}|Pictures and vector files"),
+                ],
+            ),
+        ]
+    };
+    for (program, args) in choosers {
+        let Ok(mut child) = std::process::Command::new(program)
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        else {
+            continue;
+        };
+        let mut stdout = child.stdout.take()?;
+        if let Ok(mut open) = OPEN_DIALOG.lock() {
+            *open = Some(child);
+        }
+        let mut text = String::new();
+        let read = std::io::Read::read_to_string(&mut stdout, &mut text);
+        if let Some(mut child) = OPEN_DIALOG.lock().ok().and_then(|mut open| open.take()) {
+            let _ = child.wait();
+        }
+        read.ok()?;
+        let path = text.trim_end_matches(['\n', '\r']).to_owned();
+        return (!path.is_empty()).then_some(path);
+    }
+    None
 }

@@ -19,7 +19,8 @@
 //! within `MAX_SPREAD` levels of its mean, the mean at least
 //! `MIN_CONTRAST` levels off the host's fill, and no pixel of the blob
 //! beside another region or the picture's border (a blob against an edge is
-//! a boundary drawn in the wrong place, not a lost region). Thin strokes,
+//! a boundary drawn in the wrong place, not a lost region; on an exact
+//! palette the border is no exception, `recover_exact`). Thin strokes,
 //! gradients and texture have no such core and are left alone; photographs
 //! are not passed here. On anti-aliased
 //! artwork the outline is the half-coverage contour of the blob's colour
@@ -71,8 +72,10 @@ pub fn recover_svg(
 /// back on its pixel edges, however small: a dotted line's dots and lone
 /// pixels, which the unblended presets merge away. The thickness test is
 /// for blended pixels and JPEG's blocks; here every pixel is a palette
-/// colour. Run before the regions' colours and lines were right, this drew
-/// back every 1 px line the engine had traced in a blend (exact-recovery.md).
+/// colour, and a blob against the picture's border is taken too (no traced
+/// boundary lies there to be misplaced). Run before the regions' colours and
+/// lines were right, this drew back every 1 px line the engine had traced in
+/// a blend (exact-recovery.md).
 /// The blobs are painted over their region, one path per colour, with no
 /// hole cut: a square per pixel with its own group, a hole to match and the
 /// desktop's seam strip under that hole cost about 290 bytes a pixel. A blob
@@ -131,7 +134,11 @@ fn recover(
             let p = blob[next];
             next += 1;
             let (x, y) = (p % w, p / w);
-            if x == 0 || y == 0 || x + 1 == w || y + 1 == h {
+            // On an exact palette the border is no boundary drawn in the
+            // wrong place: every pixel is its colour, and a dot on the edge
+            // is lost like any other (a dither's border dots were, September
+            // 25, 2026).
+            if !exact && (x == 0 || y == 0 || x + 1 == w || y + 1 == h) {
                 enclosed = false;
             }
             for q in neighbours4(p, w, h) {
@@ -268,6 +275,26 @@ fn half_coverage(blob: &[usize], w: usize, alpha: impl Fn(usize) -> f64) -> Opti
     let value: Vec<f64> = (0..gw * gh)
         .map(|i| alpha((gy0 + i / gw) * w + gx0 + i % gw))
         .collect();
+    let mut loops = contour_loops(&value, gw, gh, (gx0, gy0), 0.5)?;
+    if loops.len() != 1 {
+        return None;
+    }
+    loops.pop()
+}
+
+/// Every loop of the `level` contour of `value`, a `gw` by `gh` grid of
+/// samples at pixel centres whose first sits at the centre of pixel
+/// `origin` (marching squares, linear between centres, a saddle cell
+/// resolved by the mean of its corners). The grid's outer ring must lie
+/// below `level`, so every loop closes; `None` if one does not.
+pub(crate) fn contour_loops(
+    value: &[f64],
+    gw: usize,
+    gh: usize,
+    origin: (usize, usize),
+    level: f64,
+) -> Option<Vec<Vec<Point>>> {
+    let (gx0, gy0) = origin;
     let at = |gx: usize, gy: usize| value[gy * gw + gx];
     // Each crossing of an edge between two centres is a vertex, keyed by
     // the edge; each cell joins its crossings into segments.
@@ -283,13 +310,13 @@ fn half_coverage(blob: &[usize], w: usize, alpha: impl Fn(usize) -> f64) -> Opti
             let bits = corners
                 .iter()
                 .enumerate()
-                .fold(0, |b, (i, v)| b | (usize::from(*v >= 0.5) << i));
+                .fold(0, |b, (i, v)| b | (usize::from(*v >= level) << i));
             // Edges of the cell: top (cx, cy, horizontal), right, bottom, left.
             let top = (cx, cy, true);
             let right = (cx + 1, cy, false);
             let bottom = (cx, cy + 1, true);
             let left = (cx, cy, false);
-            let centre = corners.iter().sum::<f64>() / 4. >= 0.5;
+            let centre = corners.iter().sum::<f64>() / 4. >= level;
             let pairs: &[(Crossing, Crossing)] = match bits {
                 0 | 15 => &[],
                 1 | 14 => &[(left, top)],
@@ -332,9 +359,6 @@ fn half_coverage(blob: &[usize], w: usize, alpha: impl Fn(usize) -> f64) -> Opti
         chain.pop();
         loops.push(chain);
     }
-    if loops.len() != 1 {
-        return None;
-    }
     let point = |(gx, gy, horizontal): Crossing| {
         let (a, b) = if horizontal {
             (at(gx, gy), at(gx + 1, gy))
@@ -344,7 +368,7 @@ fn half_coverage(blob: &[usize], w: usize, alpha: impl Fn(usize) -> f64) -> Opti
         let t = if (b - a).abs() < 1e-12 {
             0.5
         } else {
-            (0.5 - a) / (b - a)
+            (level - a) / (b - a)
         };
         let (x, y) = ((gx0 + gx) as f64 + 0.5, (gy0 + gy) as f64 + 0.5);
         if horizontal {
@@ -353,7 +377,12 @@ fn half_coverage(blob: &[usize], w: usize, alpha: impl Fn(usize) -> f64) -> Opti
             Point { x, y: y + t }
         }
     };
-    Some(loops[0].iter().map(|&k| point(k)).collect())
+    Some(
+        loops
+            .iter()
+            .map(|chain| chain.iter().map(|&k| point(k)).collect())
+            .collect(),
+    )
 }
 
 /// The blob's outline along its pixel edges, corners only, when it is one
@@ -415,7 +444,7 @@ pub(crate) fn pixel_edges(blob: &[usize], w: usize) -> Option<Vec<Point>> {
 /// A closed polygon with every vertex within `tolerance` of the line of its
 /// kept neighbours dropped (Douglas-Peucker from its two farthest-apart
 /// vertices).
-fn simplified(polygon: &[Point], tolerance: f64) -> Vec<Point> {
+pub(crate) fn simplified(polygon: &[Point], tolerance: f64) -> Vec<Point> {
     let n = polygon.len();
     if n < 4 {
         return polygon.to_vec();

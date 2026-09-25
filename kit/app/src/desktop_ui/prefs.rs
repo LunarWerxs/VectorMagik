@@ -19,6 +19,10 @@ pub(super) const PORTABLE_PREFS: &str = "VectorMagik-settings.txt";
 /// place (`installed_prefs`), for a copy in a folder it may not write.
 #[cfg(feature = "desktop")]
 pub(super) fn prefs_path() -> Option<PathBuf> {
+    // A Mac app is a signed bundle: nothing is written inside it.
+    if cfg!(target_os = "macos") {
+        return installed_prefs();
+    }
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().and_then(portable_prefs))
@@ -39,11 +43,20 @@ pub(super) fn portable_prefs(folder: &Path) -> Option<PathBuf> {
     writable.then_some(path)
 }
 
-/// `%APPDATA%\VectorMagik\desktop.txt`, or the XDG config folder elsewhere:
-/// where the settings lived before the app kept them beside itself.
+/// `%APPDATA%\VectorMagik\desktop.txt`, `~/Library/Application Support` on a
+/// Mac, or the XDG config folder elsewhere: where the settings lived before
+/// the app kept them beside itself.
 #[cfg(feature = "desktop")]
 pub(super) fn installed_prefs() -> Option<PathBuf> {
     let set = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    if cfg!(target_os = "macos") {
+        let home = PathBuf::from(set("HOME")?);
+        return Some(
+            home.join("Library/Application Support")
+                .join("VectorMagik")
+                .join("desktop.txt"),
+        );
+    }
     let base = set("APPDATA")
         .map(PathBuf::from)
         .or_else(|| set("XDG_CONFIG_HOME").map(PathBuf::from))

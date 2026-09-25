@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+## 0.4.2 (September 25, 2026)
+
+- VectorMagik runs on Mac and Linux. A universal Mac app for Apple Silicon and Intel
+  (macOS 11 or newer, not notarized yet: right-click it and choose Open the first time)
+  and a Linux build for X11 and Wayland (Ubuntu 22.04, Debian 12 or newer), each with the
+  command line beside it. Their Open and Save dialogs are the system's (AppleScript's on
+  a Mac, zenity's or kdialog's on Linux); dragging a result out of the window stays
+  Windows-only for now.
+- Icons that drew as empty boxes now draw: the Advanced settings card's icon everywhere,
+  and the cards' fold arrows and the arrow in texts in the browser.
+- Small print keeps its ink along the line: a line of pale text on a dark background
+  no longer comes out with some letters white and others lilac, and letters the tracer
+  had run together are drawn apart from their pixels, in the line's colour.
+- Pixel-edged artwork is traced from its pixels: a screenshot's text, an aliased logo or
+  an icon, drawn without anti-aliasing in exact colours, keeps its letters and lines
+  instead of being smoothed like a photograph. Small pixel-edged text is much closer to
+  the true letters (at a 10 px cap the & keeps its loop and "tt" no longer reads "(t"),
+  1 px diagonals stay whole and straight, and a straight side is one line. Such a picture
+  skips true lines, Auto straighten and Auto's stronger simplify, which bent what the
+  tracer drew.
+- Dithered pixel art saves small: an area whose pixels repeat a small pattern (a checker,
+  an ordered dither) is written as one shape filled with that pattern in SVG, PDF, AI and
+  EPS, instead of a square per pixel (a 96 px checker: 207 KB of SVG before). The picture
+  is the same pixel for pixel, and the app opens its own saved files back as the squares.
+- DXF and EMF save dithered areas small too. A DXF draws the repeating pattern once and
+  places it as an AutoCAD array (the dither sample: 1 MB of DXF down to 45 KB, the same
+  outlines once exploded); an EMF writes the area's squares as one polygon record, about a
+  third of the size, the same pixels in Windows.
+- Small lettering (a cap height around 10 px) is drawn from its pixels: letters come out
+  as letters instead of wedges, an i keeps its dot, and the curves are as smooth as the
+  engine's own, at about 17% more bytes for such pictures.
+- Pale small print on dark backgrounds keeps its colour: lilac and mint text no longer come
+  out white and grey, and yellow and pink are no longer dulled; slightly bolder small print
+  (13 and 14 px) is drawn from its pixels too.
+- Pixel art keeps its single pixels on the picture's edge. A dot touching the border (a
+  dither's outer row, a sprite's last pixel) was dropped; it now comes back like any other.
+
 ## 0.4.1 (September 24, 2026)
 
 - DXF files open in Adobe Illustrator and other AutoCAD-based readers: the "lines" modes no

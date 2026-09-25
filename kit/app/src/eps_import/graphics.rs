@@ -86,6 +86,8 @@ pub(super) struct GState {
     space_obj: Obj,
     comps: Vec<f64>,
     patterned: bool,
+    /// The coloured pattern set, as `makepattern` made it.
+    pattern: Option<Dict>,
     width: f64,
     pub(super) cap: u8,
     pub(super) join: u8,
@@ -114,6 +116,7 @@ impl GState {
             space_obj: Obj::name("DeviceGray"),
             comps: vec![0.],
             patterned: false,
+            pattern: None,
             width: 1.,
             cap: 0,
             join: 0,
@@ -441,6 +444,11 @@ impl Machine {
 
     fn fill_path(&mut self, evenodd: bool) -> Res {
         let outline = self.gs.outline;
+        if let (None, Some(pattern)) = (outline, self.gs.pattern.clone()) {
+            if self.tiled(&pattern)? {
+                return Ok(());
+            }
+        }
         let colour = rgb8(self.gs.rgb);
         let path = self.take_path();
         let shape = match outline {
@@ -481,9 +489,132 @@ impl Machine {
         })
     }
 
+    /// A rectangle filled with a coloured tiling pattern, as the app saves a
+    /// dithered area (`dither.rs`): the pattern's `PaintProc` run once per
+    /// tile over the rectangle, each subpath it paints kept where it lies
+    /// wholly inside it. False, with the path left alone, for any other
+    /// pattern or path (it is drawn in one colour, as before).
+    fn tiled(&mut self, pattern: &Dict) -> Res<bool> {
+        /// Tiles drawn, at most, before a pattern is drawn in one colour.
+        const MAX_TILES: i64 = 1 << 20;
+        let number = |key: &[u8]| pattern.find(key).and_then(|v| v.num());
+        let (Some(xs), Some(ys), Some(m), Some(paint)) = (
+            number(b"XStep"),
+            number(b"YStep"),
+            pattern.find(b"Implementation").and_then(|v| matrix_of(&v)),
+            pattern.find(b"PaintProc"),
+        ) else {
+            return Ok(false);
+        };
+        let (step_x, step_y) = (xs * m[0], ys * m[3]);
+        if self.within.is_some()
+            || m[1] != 0.
+            || m[2] != 0.
+            || !(step_x.abs() > 0. && step_y.abs() > 0.)
+            || !step_x.is_finite()
+            || !step_y.is_finite()
+        {
+            return Ok(false);
+        }
+        let mut corners = Vec::new();
+        for seg in self.gs.path.iter() {
+            match seg {
+                Seg::Move(p) | Seg::Line(p) => corners.push(*p),
+                Seg::Close => {}
+                Seg::Curve(..) => return Ok(false),
+            }
+        }
+        let fold = |f: fn(f64, f64) -> f64, start: f64, axis: usize| {
+            corners
+                .iter()
+                .fold(start, |a, p| f(a, if axis == 0 { p.0 } else { p.1 }))
+        };
+        let (l, r) = (
+            fold(f64::min, f64::INFINITY, 0),
+            fold(f64::max, f64::NEG_INFINITY, 0),
+        );
+        let (b, t) = (
+            fold(f64::min, f64::INFINITY, 1),
+            fold(f64::max, f64::NEG_INFINITY, 1),
+        );
+        let square = corners.len() >= 4
+            && corners
+                .iter()
+                .all(|p| (p.0 == l || p.0 == r) && (p.1 == b || p.1 == t));
+        if !square || !(r > l && t > b) {
+            return Ok(false);
+        }
+        let range = |lo: f64, hi: f64, step: f64, offset: f64| {
+            let (a, z) = ((lo - offset) / step, (hi - offset) / step);
+            (a.min(z).floor() as i64 - 1, a.max(z).ceil() as i64 + 1)
+        };
+        let (k0, k1) = range(l, r, step_x, m[4]);
+        let (j0, j1) = range(b, t, step_y, m[5]);
+        if (k1 - k0).saturating_mul(j1 - j0) > MAX_TILES {
+            return Ok(false);
+        }
+        self.within = Some([l, b, r, t]);
+        let mut result = Ok(());
+        'tiles: for j in j0..j1 {
+            for k in k0..k1 {
+                if let Err(fault) = self.push_state(None) {
+                    result = Err(fault);
+                    break 'tiles;
+                }
+                self.gs.ctm = multiply([1., 0., 0., 1., k as f64 * xs, j as f64 * ys], m);
+                self.new_path();
+                self.push(Obj::Dict(pattern.clone()));
+                let run = self.exec(paint.clone());
+                if let Some((state, _)) = self.pop_state() {
+                    self.gs = state;
+                }
+                if let Err(fault) = run {
+                    result = Err(fault);
+                    break 'tiles;
+                }
+            }
+        }
+        self.within = None;
+        result?;
+        self.new_path();
+        Ok(true)
+    }
+
     /// Adds a painted shape to the artwork; a stroke of the path just
     /// filled (`gsave fill grestore stroke`) joins that fill's element.
-    pub(super) fn emit(&mut self, shape: Shape) -> Res {
+    pub(super) fn emit(&mut self, mut shape: Shape) -> Res {
+        if let Some([l, b, r, t]) = self.within {
+            let slack = 1e-6 * (r - l).abs().max(t - b).max(1.);
+            let inside = |p: &Pt| {
+                p.0 >= l - slack && p.0 <= r + slack && p.1 >= b - slack && p.1 <= t + slack
+            };
+            let mut kept = Vec::with_capacity(shape.path.len());
+            let mut piece: Vec<Seg> = Vec::new();
+            let mut whole = true;
+            for seg in shape
+                .path
+                .iter()
+                .chain(std::iter::once(&Seg::Move((0., 0.))))
+            {
+                if matches!(seg, Seg::Move(_)) {
+                    if whole {
+                        kept.append(&mut piece);
+                    }
+                    piece.clear();
+                    whole = true;
+                }
+                whole &= match seg {
+                    Seg::Move(p) | Seg::Line(p) => inside(p),
+                    Seg::Curve(a, c, p) => inside(a) && inside(c) && inside(p),
+                    Seg::Close => true,
+                };
+                piece.push(*seg);
+            }
+            if kept.is_empty() {
+                return Ok(());
+            }
+            shape.path = kept;
+        }
         let draws = shape
             .path
             .iter()
@@ -532,6 +663,7 @@ impl Machine {
         self.gs.space = space;
         self.gs.space_obj = name;
         self.gs.patterned = false;
+        self.gs.pattern = None;
     }
 
     /// Sets the current colour to `comps` in the current colour space.
@@ -661,6 +793,7 @@ impl Machine {
             _ => [0.5; 3],
         };
         self.gs.patterned = true;
+        self.gs.pattern = (!uncoloured).then(|| pattern.clone());
         Ok(())
     }
 }
@@ -1283,13 +1416,15 @@ pub(super) static OPS: &[Entry] = &[
     (
         "makepattern",
         |m| {
-            m.pop()?;
+            let (_, matrix) = m.pop_matrix()?;
             let pattern = m.pop_dict()?;
             let copy = Dict::new(pattern.size() + 1);
             for (key, value) in pattern.entries() {
                 copy.put(key, value).map_err(Fault::Error)?;
             }
-            copy.set("Implementation", Obj::Null);
+            // Pattern space onto the device, as it is fixed now: what
+            // `tiled` draws the tiles with.
+            copy.set("Implementation", Obj::numbers(&multiply(matrix, m.gs.ctm)));
             m.answer(Obj::Dict(copy))
         },
         2,

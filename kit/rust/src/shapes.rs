@@ -237,15 +237,32 @@ pub fn remove_islands(svg: &str, removals: &[Removal]) -> Result<(String, usize)
     if doomed.is_empty() {
         return Ok((svg.to_owned(), 0));
     }
+    let none = std::collections::HashMap::new();
+    Ok((rewrite_paths(svg, &ranges, &paths, &doomed, &none), removed))
+}
+
+/// The document with the `doomed` (path, subpath) contours left out and the
+/// `added` subpaths appended to their paths; a path left with no contours
+/// is dropped entirely.
+pub(crate) fn rewrite_paths(
+    svg: &str,
+    ranges: &[(usize, usize)],
+    paths: &[Vec<Subpath>],
+    doomed: &std::collections::HashSet<(usize, usize)>,
+    added: &std::collections::HashMap<usize, Vec<Subpath>>,
+) -> String {
     let mut out = String::with_capacity(svg.len());
     let mut last = 0;
     for (path_index, ((start, end), path)) in ranges.iter().zip(paths.iter()).enumerate() {
-        let kept: Vec<Subpath> = path
+        let mut kept: Vec<Subpath> = path
             .iter()
             .enumerate()
             .filter(|(i, _)| !doomed.contains(&(path_index, *i)))
             .map(|(_, s)| s.clone())
             .collect();
+        if let Some(more) = added.get(&path_index) {
+            kept.extend(more.iter().cloned());
+        }
         if kept.is_empty() {
             // Drop the whole element when its extent can be found.
             if let Some((element_start, element_end)) = element_bounds(svg, *start, *end) {
@@ -261,12 +278,12 @@ pub fn remove_islands(svg: &str, removals: &[Removal]) -> Result<(String, usize)
         last = *end;
     }
     out.push_str(&svg[last..]);
-    Ok((out, removed))
+    out
 }
 
 /// The `<path ... />` element around a `d` attribute, with a following line
 /// break; `None` when the markup is not the engine's simple form.
-fn element_bounds(svg: &str, d_start: usize, d_end: usize) -> Option<(usize, usize)> {
+pub(crate) fn element_bounds(svg: &str, d_start: usize, d_end: usize) -> Option<(usize, usize)> {
     let element_start = svg[..d_start].rfind("<path")?;
     if svg[element_start..d_start].contains('>') {
         return None;

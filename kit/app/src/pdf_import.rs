@@ -16,7 +16,9 @@
 //! so once in `skipped`: text, images, gradients, clipping (shapes are drawn
 //! whole; a clip that is one rectangle around the whole page cuts nothing
 //! and is not mentioned, the app's own PDFs clip every colour group so),
-//! dashes (drawn solid), patterns (drawn in one colour).
+//! dashes (drawn solid), patterns (drawn in one colour, but for a rectangle
+//! filled with a coloured tiling pattern, as the app saves a dithered area:
+//! its tiles are drawn, each piece kept where it lies inside the rectangle).
 //!
 //! A file is untrusted input: every size is capped (operations, nesting,
 //! decoded bytes, the SVG written), so a hostile file ends in an error or a
@@ -476,12 +478,18 @@ fn lab_to_rgb(l: f64, a: f64, b: f64) -> [f64; 3] {
 struct Colour {
     space: Rc<Space>,
     components: Vec<f64>,
+    /// In a pattern space, the pattern's resource name.
+    pattern: Option<Rc<[u8]>>,
 }
 
 impl Colour {
     fn new(space: Rc<Space>) -> Self {
         let components = space.initial();
-        Self { space, components }
+        Self {
+            space,
+            components,
+            pattern: None,
+        }
     }
 }
 
@@ -515,14 +523,31 @@ struct Path {
     /// When the path is one `re` alone: its corners and the segment count
     /// it ended at.
     rect: Option<([(f64, f64); 4], usize)>,
+    /// Each subpath: where it starts in `d`, and the box round its points
+    /// (left, top, right, bottom).
+    pieces: Vec<(usize, [f64; 4])>,
 }
 
 impl Path {
     fn write(&mut self, command: char, points: &[(f64, f64)]) {
+        if command == 'M' {
+            self.pieces.push((
+                self.d.len(),
+                [
+                    f64::INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NEG_INFINITY,
+                ],
+            ));
+        }
         self.d.push(command);
         for (i, &(x, y)) in points.iter().enumerate() {
             if !(x.abs() < FAR && y.abs() < FAR) {
                 self.broken = true;
+            }
+            if let Some((_, b)) = self.pieces.last_mut() {
+                *b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
             }
             let space = if i == 0 { "" } else { " " };
             let _ = write!(self.d, "{space}{} {}", num(x), num(y));
@@ -587,6 +612,11 @@ struct Painter<'d> {
     stopped: bool,
     /// Each form's decoded content, by object number.
     forms: HashMap<u32, Option<Rc<[u8]>>>,
+    /// The page's own placement: the space a pattern's matrix starts from.
+    base: [f64; 6],
+    /// While a pattern's tiles are drawn over a rectangle (left, top,
+    /// right, bottom): only subpaths wholly inside it are kept.
+    within: Option<[f64; 4]>,
     gray: Rc<Space>,
     rgb: Rc<Space>,
     cmyk: Rc<Space>,
@@ -625,6 +655,8 @@ impl<'d> Painter<'d> {
             content_read: 0,
             stopped: false,
             forms: HashMap::new(),
+            base: placement,
+            within: None,
             gray,
             rgb: Rc::new(Space::Rgb),
             cmyk: Rc::new(Space::Cmyk),
@@ -786,8 +818,11 @@ impl<'d> Painter<'d> {
                     }
                 }
             }
-            b"f" | b"F" => self.paint(Some(false), false),
-            b"f*" => self.paint(Some(true), false),
+            b"f" | b"F" | b"f*" => {
+                if !self.tiled(resources, depth) {
+                    self.paint(Some(op == b"f*"), false);
+                }
+            }
             b"S" => self.paint(None, true),
             b"B" => self.paint(Some(false), true),
             b"B*" => self.paint(Some(true), true),
@@ -831,7 +866,9 @@ impl<'d> Painter<'d> {
                 let numbers: Vec<f64> = args.iter().filter_map(Obj::number).collect();
                 let colour = self.colour(op[0] == b'S');
                 let n = colour.space.components();
-                if !matches!(*colour.space, Space::Pattern) && numbers.len() >= n {
+                if matches!(*colour.space, Space::Pattern) {
+                    colour.pattern = args.last().and_then(Obj::name).map(Rc::from);
+                } else if numbers.len() >= n {
                     colour.components = numbers[numbers.len() - n..].to_vec();
                 }
             }
@@ -871,7 +908,11 @@ impl<'d> Painter<'d> {
         };
         let components: Option<Vec<f64>> = args[start..].iter().map(Obj::number).collect();
         if let Some(components) = components {
-            *self.colour(stroke) = Colour { space, components };
+            *self.colour(stroke) = Colour {
+                space,
+                components,
+                pattern: None,
+            };
         }
     }
 
@@ -1234,15 +1275,141 @@ impl<'d> Painter<'d> {
             && bottom >= self.page.1 - slack
     }
 
+    /// A rectangle filled with a coloured tiling pattern, as the app saves a
+    /// dithered area (`dither.rs`): the pattern's content run once per tile
+    /// over the rectangle, each subpath it paints kept where it lies wholly
+    /// inside it. False, with nothing drawn and the path kept, for any other
+    /// fill (it is drawn in one colour, as before).
+    fn tiled(&mut self, resources: &Obj, depth: usize) -> bool {
+        /// Tiles drawn, at most, before a pattern is drawn in one colour.
+        const MAX_TILES: i64 = 1 << 18;
+        let Some(name) = self.state.fill.pattern.clone() else {
+            return false;
+        };
+        let Some((corners, segments)) = self.path.rect else {
+            return false;
+        };
+        if self.within.is_some()
+            || self.clip
+            || segments != self.path.segments
+            || depth >= MAX_FORM_DEPTH
+        {
+            return false;
+        }
+        let Some(raw) = self.resource(resources, b"Pattern", &name) else {
+            return false;
+        };
+        let Obj::Stream(stream) = self.doc.resolve(&raw) else {
+            return false;
+        };
+        let get = |key: &[u8]| stream.dict.get(key).map(|v| self.doc.resolve(v));
+        let int = |key: &[u8]| get(key).and_then(|v| v.int());
+        let step = |key: &[u8]| {
+            get(key)
+                .and_then(|v| v.number())
+                .filter(|v| v.is_finite() && *v != 0.)
+        };
+        let (Some(xs), Some(ys)) = (step(b"XStep"), step(b"YStep")) else {
+            return false;
+        };
+        if int(b"PatternType") != Some(1) || int(b"PaintType") != Some(1) {
+            return false;
+        }
+        let matrix = stream
+            .dict
+            .get(b"Matrix")
+            .and_then(|m| numbers(self.doc, m))
+            .and_then(|m| <[f64; 6]>::try_from(m).ok())
+            .unwrap_or(IDENTITY);
+        let m = concat(&matrix, &self.base);
+        if m[1] != 0. || m[2] != 0. || m[0] == 0. || m[3] == 0. {
+            return false;
+        }
+        let xs_of = corners.map(|c| c.0);
+        let ys_of = corners.map(|c| c.1);
+        let (left, right) = (
+            xs_of.iter().copied().fold(f64::INFINITY, f64::min),
+            xs_of.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        let (top, bottom) = (
+            ys_of.iter().copied().fold(f64::INFINITY, f64::min),
+            ys_of.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        let range = |lo: f64, hi: f64, step: f64, offset: f64| {
+            let (a, z) = ((lo - offset) / step, (hi - offset) / step);
+            (a.min(z).floor() as i64 - 1, a.max(z).ceil() as i64 + 1)
+        };
+        let (k0, k1) = range(left, right, xs * m[0], m[4]);
+        let (j0, j1) = range(top, bottom, ys * m[3], m[5]);
+        if (k1 - k0).saturating_mul(j1 - j0) > MAX_TILES {
+            return false;
+        }
+        let Ok(content) = self.doc.decode(&stream) else {
+            return false;
+        };
+        let own = get(b"Resources");
+        let inner = own
+            .filter(|r| r.dict().is_some())
+            .unwrap_or_else(|| resources.clone());
+        let state = self.state.clone();
+        let (saved, unsaved) = (self.saved.len(), self.unsaved);
+        self.path = Path::default();
+        self.within = Some([left, top, right, bottom]);
+        'tiles: for j in j0..j1 {
+            for k in k0..k1 {
+                self.state = state.clone();
+                self.state.ctm = concat(&[1., 0., 0., 1., k as f64 * xs, j as f64 * ys], &m);
+                self.run(&content, &inner, depth + 1);
+                self.saved.truncate(saved);
+                self.unsaved = unsaved;
+                self.path = Path::default();
+                self.clip = false;
+                if self.stopped {
+                    break 'tiles;
+                }
+            }
+        }
+        self.within = None;
+        self.state = state;
+        true
+    }
+
     /// A painting operator: the path written with the fill (`Some(evenodd)`)
     /// and stroke asked for, and cleared.
     fn paint(&mut self, fill: Option<bool>, stroke: bool) {
-        let path = std::mem::take(&mut self.path);
+        let mut path = std::mem::take(&mut self.path);
         if std::mem::take(&mut self.clip) && !self.around_the_page(&path) {
             self.note(CLIPPING);
         }
         if (fill.is_none() && !stroke) || path.segments == 0 || path.broken {
             return;
+        }
+        if let Some([left, top, right, bottom]) = self.within {
+            // A tile's pieces: only those wholly inside the rectangle.
+            let slack = 1e-6 * (right - left).max(bottom - top).max(1.);
+            let ends: Vec<usize> = path
+                .pieces
+                .iter()
+                .skip(1)
+                .map(|p| p.0)
+                .chain([path.d.len()])
+                .collect();
+            let kept: String = path
+                .pieces
+                .iter()
+                .zip(ends)
+                .filter(|((_, b), _)| {
+                    b[0] >= left - slack
+                        && b[1] >= top - slack
+                        && b[2] <= right + slack
+                        && b[3] <= bottom + slack
+                })
+                .map(|((start, _), end)| &path.d[*start..end])
+                .collect();
+            if kept.is_empty() {
+                return;
+            }
+            path.d = kept;
         }
         let fill_alpha = self.state.fill_alpha * self.state.group_alpha;
         let stroke_alpha = self.state.stroke_alpha * self.state.group_alpha;
