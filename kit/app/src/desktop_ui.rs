@@ -477,19 +477,38 @@ pub enum Overlay {
 pub enum LicenceUse {
     Personal,
     Commercial,
+    /// For work, free for `TRIAL_SECONDS` from this Unix time: a business
+    /// tries the app without claiming it is for personal use (the owner,
+    /// September 24, 2026: "I'd rather give them a chance").
+    Trial(i64),
 }
 
+/// How long the free commercial trial runs: a day.
+pub const TRIAL_SECONDS: i64 = 24 * 60 * 60;
+
 impl LicenceUse {
-    fn word(self) -> &'static str {
+    fn word(self) -> String {
         match self {
-            LicenceUse::Personal => "personal",
-            LicenceUse::Commercial => "commercial",
+            LicenceUse::Personal => "personal".into(),
+            LicenceUse::Commercial => "commercial".into(),
+            LicenceUse::Trial(start) => format!("trial:{start}"),
         }
     }
     fn from_word(word: &str) -> Option<Self> {
         match word.trim() {
             "personal" => Some(LicenceUse::Personal),
             "commercial" => Some(LicenceUse::Commercial),
+            other => other
+                .strip_prefix("trial:")
+                .and_then(|start| start.parse().ok())
+                .map(LicenceUse::Trial),
+        }
+    }
+    /// The seconds of a trial left at `now` (0 once it has ended); None when
+    /// this is no trial.
+    pub fn trial_left(self, now: i64) -> Option<i64> {
+        match self {
+            LicenceUse::Trial(start) => Some((start + TRIAL_SECONDS - now).clamp(0, TRIAL_SECONDS)),
             _ => None,
         }
     }

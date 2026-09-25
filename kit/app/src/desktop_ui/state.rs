@@ -33,10 +33,14 @@ impl Desktop {
         app
     }
     /// Put the first-run question on screen when the preferences hold no
-    /// answer and no licence: the window and the page call it at start;
-    /// tests and snapshots start without it.
+    /// answer and no licence, or a commercial trial that has ended (asked
+    /// once more, without the trial): the window and the page call it at
+    /// start; tests and snapshots start without it.
     pub fn ask_licence_if_new(&mut self) {
-        self.ask_licence = self.licence_use.is_none() && self.licence.key.is_empty();
+        let now = vector_rebuild::clock::unix_seconds();
+        let trial_ended = self.licence_use.and_then(|u| u.trial_left(now)) == Some(0);
+        self.ask_licence =
+            self.licence.key.is_empty() && (self.licence_use.is_none() || trial_ended);
     }
     /// The look, and light or dark, as the Appearance popup sets them.
     pub fn set_appearance(&mut self, look: Look, theme: ThemeChoice) {

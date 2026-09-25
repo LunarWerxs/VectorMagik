@@ -5,7 +5,10 @@
 //! and stroked paths, so both formats are a direct transcription: the same
 //! path operators, the SVG's `viewBox` mapped onto a page of its declared
 //! size (points as written; px and unitless numbers at 96 per inch, as
-//! CairoSVG sized them), `preserveAspectRatio`'s default placement.
+//! CairoSVG sized them), `preserveAspectRatio`'s default placement. An
+//! opaque group is drawn clipped to the page, which hides nothing and makes
+//! an editor that opens the PDF (or the AI, the same bytes) keep it as one
+//! group.
 //!
 //! Only what the app writes is read: `svg`, `g`, `path` and `rect`, the
 //! presentation attributes `fill`, `stroke`, `stroke-width`,
@@ -23,13 +26,20 @@ use std::fmt::Write as _;
 /// The PDF of `svg`, one page at its declared size.
 pub fn to_pdf(svg: &str) -> Result<Vec<u8>, String> {
     let drawing = Drawing::parse(svg)?;
+    let (scale, tx, ty) = drawing.page_scale();
     let mut pdf = Pdf {
         view: drawing.view,
+        page: [
+            -tx / scale,
+            -ty / scale,
+            drawing.width / scale,
+            drawing.height / scale,
+        ],
         ..Pdf::default()
     };
     let mut content = String::new();
     let _ = writeln!(content, "{} cm", matrix(&drawing.page_matrix()));
-    pdf.items(&drawing.items, &mut content);
+    pdf.items(&drawing.items, (0., 0.), &mut content);
     Ok(pdf.finish(&drawing, &content))
 }
 
@@ -788,6 +798,8 @@ struct Pdf {
     /// The content of each transparency group `/X<i>`, object `6 + i`.
     forms: Vec<String>,
     view: [f64; 4],
+    /// The page in user space: x, y, width, height.
+    page: [f64; 4],
 }
 
 impl Pdf {
@@ -810,7 +822,9 @@ impl Pdf {
         let _ = write!(out, "q\n{state}/X{form} Do\nQ\n");
     }
 
-    fn items(&mut self, items: &[Item], out: &mut String) {
+    /// `items` as content; `outer` is the sum of the group translations
+    /// already applied, so the page can be found in the current user space.
+    fn items(&mut self, items: &[Item], outer: Xy, out: &mut String) {
         for item in items {
             match item {
                 Item::Shape {
@@ -836,15 +850,31 @@ impl Pdf {
                     offset,
                     items,
                 } => {
+                    let (dx, dy) = *offset;
                     let mut inner = String::new();
-                    if *offset != (0., 0.) {
-                        let _ = writeln!(inner, "1 0 0 1 {} {} cm", num(offset.0), num(offset.1));
+                    if (dx, dy) != (0., 0.) {
+                        let _ = writeln!(inner, "1 0 0 1 {} {} cm", num(dx), num(dy));
                     }
-                    self.items(items, &mut inner);
+                    let within = (outer.0 + dx, outer.1 + dy);
+                    self.items(items, within, &mut inner);
                     if *opacity < 1. {
                         self.group(inner, *opacity, out);
                     } else {
-                        let _ = write!(out, "q\n{inner}Q\n");
+                        // Clipped to the page, which hides nothing: an
+                        // editor that opens the PDF (Illustrator, and so the
+                        // AI) makes a clip group of it and keeps the SVG's
+                        // group, a colour group of the engine's documents,
+                        // together; plain `q`/`Q` it flattens (measured in
+                        // Illustrator 30.8, September 24, 2026).
+                        let [x, y, width, height] = self.page;
+                        let _ = write!(
+                            out,
+                            "q\n{} {} {} {} re W n\n{inner}Q\n",
+                            num(x - outer.0),
+                            num(y - outer.1),
+                            num(width),
+                            num(height)
+                        );
                     }
                 }
             }

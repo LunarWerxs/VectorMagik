@@ -114,14 +114,12 @@ fn the_line_modes_stay_within_their_tolerance_of_every_curve() {
         assert_eq!(polylines.len(), 4);
         let (head, lens) = &polylines[0];
         assert_eq!(
-            [
-                value(head, 8),
-                value(head, 62),
-                value(head, 420),
-                value(head, 70)
-            ],
-            ["COLOR_FF0000", "1", "16711680", "1"]
+            [value(head, 8), value(head, 62), value(head, 70)],
+            ["COLOR_FF0000", "1", "1"]
         );
+        // R12 has no true colour code, and Illustrator's AutoCAD import
+        // refuses a file that carries one.
+        assert!(pairs.iter().all(|p| p.0 != 420));
         // Every point of the curves within the tolerance of the polyline,
         // and every vertex on a curve.
         for [p0, p1, p2, p3] in LENS {
@@ -224,12 +222,32 @@ fn the_spline_mode_keeps_every_cubic_and_every_handle_resolves() {
     unique.dedup();
     assert_eq!(unique.len(), handles.len());
     assert!(handles.iter().all(|h| *h < seed));
-    for (code, pointer) in body.iter().filter(|p| [330, 340, 350].contains(&p.0)) {
+    for (code, pointer) in body.iter().filter(|p| [330, 340, 350, 390].contains(&p.0)) {
         let pointer = u32::from_str_radix(pointer, 16).unwrap();
         assert!(
             (*code == 330 && pointer == 0) || handles.contains(&pointer),
             "{code} {pointer:X}"
         );
+    }
+    // Every layer's plot style is the Normal placeholder: without one
+    // Illustrator's AutoCAD import refuses the file.
+    let placeholder = pairs
+        .iter()
+        .position(|p| *p == (0, "ACDBPLACEHOLDER".to_owned()))
+        .map(|i| pairs[i + 1].1.as_str())
+        .unwrap();
+    let layers: Vec<&[(u16, String)]> = pairs
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| **p == (0, "LAYER".to_owned()))
+        .map(|(i, _)| {
+            let end = pairs[i + 1..].iter().position(|p| p.0 == 0).unwrap() + i + 1;
+            &pairs[i..end]
+        })
+        .collect();
+    assert_eq!(layers.len(), 4);
+    for layer in layers {
+        assert_eq!(value(&layer.to_vec(), 390), placeholder);
     }
     let sections: Vec<&str> = pairs
         .windows(2)
@@ -259,17 +277,19 @@ fn a_mixed_outline_is_splines_and_lines_end_to_end_and_closed() {
 
 #[test]
 fn colours_take_their_nearest_autocad_index() {
-    assert_eq!(index_colour(13), [165, 82, 82]);
-    assert_eq!(index_colour(23), [165, 103, 82]);
-    assert_eq!(index_colour(92), [0, 165, 0]);
+    // AutoCAD's palette as Illustrator's AutoCAD import reads it.
+    assert_eq!(index_colour(13), [204, 102, 102]);
+    assert_eq!(index_colour(23), [204, 127, 102]);
+    assert_eq!(index_colour(92), [0, 204, 0]);
     assert_eq!(index_colour(240), [255, 0, 63]);
+    assert_eq!(index_colour(251), [91, 91, 91]);
     for (colour, index) in [
         ([255, 0, 0], 1),
         ([0, 0, 0], 7),
         ([255, 255, 255], 7),
         ([128, 128, 128], 8),
-        ([165, 82, 82], 13),
-        ([0, 170, 0], 92),
+        ([204, 102, 102], 13),
+        ([0, 170, 0], 94),
     ] {
         assert_eq!(nearest_index(colour), index, "{colour:?}");
     }

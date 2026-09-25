@@ -14,7 +14,9 @@
 //! transform is a simple exponential); opacity comes from `/ca` and `/CA`.
 //! Form XObjects are drawn in place. What is not paths is left out and said
 //! so once in `skipped`: text, images, gradients, clipping (shapes are drawn
-//! whole), dashes (drawn solid), patterns (drawn in one colour).
+//! whole; a clip that is one rectangle around the whole page cuts nothing
+//! and is not mentioned, the app's own PDFs clip every colour group so),
+//! dashes (drawn solid), patterns (drawn in one colour).
 //!
 //! A file is untrusted input: every size is capped (operations, nesting,
 //! decoded bytes, the SVG written), so a hostile file ends in an error or a
@@ -90,6 +92,7 @@ pub fn to_svg(bytes: &[u8], page: usize) -> Result<Imported, String> {
     };
     let (width, height, placement) = chosen.placement(&doc);
     let mut painter = Painter::new(&doc, placement);
+    painter.page = (width, height);
     let content = painter.page_content(&chosen.page);
     let resources = chosen.resources.clone().unwrap_or(Obj::Null);
     painter.run(&content, &resources, 0);
@@ -509,6 +512,9 @@ struct Path {
     segments: usize,
     /// A point was not finite or absurdly far out; the path is not drawn.
     broken: bool,
+    /// When the path is one `re` alone: its corners and the segment count
+    /// it ended at.
+    rect: Option<([(f64, f64); 4], usize)>,
 }
 
 impl Path {
@@ -565,6 +571,8 @@ struct Painter<'d> {
     path: Path,
     /// A `W` or `W*` waits for the next painting operator.
     clip: bool,
+    /// The page's width and height in page space, once known.
+    page: (f64, f64),
     body: String,
     paths: usize,
     notes: Vec<String>,
@@ -605,6 +613,7 @@ impl<'d> Painter<'d> {
             unsaved: 0,
             path: Path::default(),
             clip: false,
+            page: (0., 0.),
             body: String::new(),
             paths: 0,
             notes: Vec::new(),
@@ -765,11 +774,16 @@ impl<'d> Painter<'d> {
             b"h" => self.path.close(),
             b"re" => {
                 if let Some([x, y, w, h]) = operands(args) {
-                    self.path.move_to(at(x, y));
-                    self.path.line_to(at(x + w, y));
-                    self.path.line_to(at(x + w, y + h));
-                    self.path.line_to(at(x, y + h));
+                    let alone = self.path.segments == 0 && self.path.current.is_none();
+                    let corners = [at(x, y), at(x + w, y), at(x + w, y + h), at(x, y + h)];
+                    self.path.move_to(corners[0]);
+                    self.path.line_to(corners[1]);
+                    self.path.line_to(corners[2]);
+                    self.path.line_to(corners[3]);
                     self.path.close();
+                    if alone {
+                        self.path.rect = Some((corners, self.path.segments));
+                    }
                 }
             }
             b"f" | b"F" => self.paint(Some(false), false),
@@ -1189,11 +1203,42 @@ impl<'d> Painter<'d> {
         row.checked_mul(height)
     }
 
+    /// Whether `path` is one rectangle, square to the page, around all of
+    /// it: as a clip it cuts nothing.
+    fn around_the_page(&self, path: &Path) -> bool {
+        let Some((corners, segments)) = path.rect else {
+            return false;
+        };
+        if segments != path.segments || self.page == (0., 0.) {
+            return false;
+        }
+        let xs = corners.map(|c| c.0);
+        let ys = corners.map(|c| c.1);
+        let (left, right) = (
+            xs.iter().copied().fold(f64::INFINITY, f64::min),
+            xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        let (top, bottom) = (
+            ys.iter().copied().fold(f64::INFINITY, f64::min),
+            ys.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        );
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let square = corners
+            .iter()
+            .all(|&(x, y)| (near(x, left) || near(x, right)) && (near(y, top) || near(y, bottom)));
+        let slack = 1e-3;
+        square
+            && left <= slack
+            && top <= slack
+            && right >= self.page.0 - slack
+            && bottom >= self.page.1 - slack
+    }
+
     /// A painting operator: the path written with the fill (`Some(evenodd)`)
     /// and stroke asked for, and cleared.
     fn paint(&mut self, fill: Option<bool>, stroke: bool) {
         let path = std::mem::take(&mut self.path);
-        if std::mem::take(&mut self.clip) {
+        if std::mem::take(&mut self.clip) && !self.around_the_page(&path) {
             self.note(CLIPPING);
         }
         if (fill.is_none() && !stroke) || path.segments == 0 || path.broken {

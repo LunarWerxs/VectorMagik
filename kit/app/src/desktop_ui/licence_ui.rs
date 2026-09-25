@@ -6,8 +6,10 @@
 //! is offered to Pay again, which renews the certificate while the
 //! subscription runs and refuses it once it has ended. Nothing here stops the
 //! app: the card only says what the licence is. The first time the app runs
-//! it asks once whether it is for personal or commercial use
-//! (`licence_prompt`); the answer is kept with the preferences.
+//! it asks once whether it is for personal or commercial use, or to try it
+//! for work free for a day (`licence_prompt`, `LicenceUse::Trial`); the
+//! answer is kept with the preferences, and a trial that has ended asks once
+//! more.
 
 use super::*;
 use crate::licence::{self, Redeemed, Standing};
@@ -28,8 +30,19 @@ impl Desktop {
         let now = vector_rebuild::clock::unix_seconds();
         let standing = licence::standing(&self.licence, now);
         let commercial_without_key = matches!(standing, Standing::Personal)
-            && self.licence_use == Some(LicenceUse::Commercial);
+            && matches!(
+                self.licence_use,
+                Some(LicenceUse::Commercial | LicenceUse::Trial(_))
+            );
+        let trial = self.licence_use.and_then(|u| u.trial_left(now));
         let summary = match &standing {
+            Standing::Personal if trial == Some(0) => {
+                "Commercial trial ended \u{00B7} add your key".to_owned()
+            }
+            Standing::Personal if trial.is_some() => format!(
+                "Commercial trial \u{00B7} {} left",
+                time_left(trial.unwrap_or(0))
+            ),
             Standing::Personal if commercial_without_key => {
                 "Commercial \u{00B7} add your key".to_owned()
             }
@@ -60,6 +73,31 @@ impl Desktop {
             true,
             |ui| {
                 match &standing {
+                    Standing::Personal if trial == Some(0) => {
+                        note(
+                            ui,
+                            &format!(
+                                "Your free day of commercial use has ended. For work, a \
+                                 commercial license is {}: buy one, then paste the key \
+                                 from its email here.",
+                                licence::PRICE
+                            ),
+                            pal().dim,
+                        );
+                    }
+                    Standing::Personal if trial.is_some() => {
+                        note(
+                            ui,
+                            &format!(
+                                "Your free commercial trial ends in {}. To keep using \
+                                 VectorMagik for work after that, a commercial license \
+                                 is {}: buy one, then paste the key from its email here.",
+                                time_left(trial.unwrap_or(0)),
+                                licence::PRICE
+                            ),
+                            pal().dim,
+                        );
+                    }
                     Standing::Personal if commercial_without_key => {
                         note(
                             ui,
@@ -247,6 +285,9 @@ impl Desktop {
         let key = licence::normalize_key(&self.licence_input);
         let width = dialog_width(ctx, 500.);
         let opened = self.licence_opened;
+        let now = vector_rebuild::clock::unix_seconds();
+        // Asked again because the free day is over: no second trial.
+        let trial_ended = self.licence_use.and_then(|u| u.trial_left(now)) == Some(0);
         egui::Modal::new(egui::Id::new("licence-prompt"))
             .frame(popup_frame().inner_margin(Margin::same(24)))
             .backdrop_color(p.scrim)
@@ -270,9 +311,14 @@ impl Desktop {
                                 .color(p.text),
                         );
                         ui.label(
-                            RichText::new("How will you use it?")
-                                .size(13.5)
-                                .color(p.dim),
+                            RichText::new(if trial_ended {
+                                "Your free day of commercial use has ended. How will you \
+                                 use it now?"
+                            } else {
+                                "How will you use it?"
+                            })
+                            .size(13.5)
+                            .color(p.dim),
                         );
                     });
                 });
@@ -305,6 +351,19 @@ impl Desktop {
                 }
                 if commercial {
                     self.prompt_key = true;
+                }
+                if !trial_ended
+                    && ui
+                        .add(pill_widget(
+                            "Not sure yet? Try it for work free for 24 hours",
+                        ))
+                        .on_hover_text(
+                            "Commercial use free for a day: no key and no payment. After \
+                             that, the app asks again.",
+                        )
+                        .clicked()
+                {
+                    answer = Some(LicenceUse::Trial(now));
                 }
                 if self.prompt_key {
                     ui.add_space(2.);
@@ -515,4 +574,15 @@ impl Desktop {
             Redeemed::Unreachable(reason) => self.licence_note = Some(reason),
         }
     }
+}
+
+/// A trial's time left in words: whole hours, rounded up, or minutes in its
+/// last hour.
+fn time_left(seconds: i64) -> String {
+    let (count, unit) = if seconds >= 3600 {
+        ((seconds + 3599) / 3600, "hour")
+    } else {
+        (((seconds + 59) / 60).max(1), "minute")
+    };
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }

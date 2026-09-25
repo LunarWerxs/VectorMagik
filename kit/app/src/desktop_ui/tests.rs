@@ -1821,6 +1821,15 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
     );
     let text = prefs::write_prefs((true, false), &Default::default(), chosen);
     assert_eq!(prefs::parse_appearance(&text), chosen);
+    // A free commercial trial keeps when it began.
+    let trial = (
+        Look::Classic,
+        ThemeChoice::Dark,
+        Some(LicenceUse::Trial(1_758_700_000)),
+    );
+    let text = prefs::write_prefs((true, false), &Default::default(), trial);
+    assert!(text.contains("licence_use=trial:1758700000\r\n"), "{text}");
+    assert_eq!(prefs::parse_appearance(&text), trial);
     assert_eq!(
         prefs::parse_appearance("look=paisley\ntheme=sepia\nlicence_use=maybe\n"),
         classic
@@ -2119,6 +2128,18 @@ fn the_first_run_question_is_asked_once_and_an_answer_or_a_licence_ends_it() {
     app.licence_use = Some(LicenceUse::Personal);
     app.ask_licence_if_new();
     assert!(!app.ask_licence);
+    // A free day of commercial use is not asked about while it runs, and
+    // once it has ended the question comes back (without a second trial).
+    let now = vector_rebuild::clock::unix_seconds();
+    app.licence_use = Some(LicenceUse::Trial(now - 3600));
+    app.ask_licence_if_new();
+    assert!(!app.ask_licence);
+    assert_eq!(app.licence_use.unwrap().trial_left(now), Some(23 * 3600));
+    app.licence_use = Some(LicenceUse::Trial(now - TRIAL_SECONDS - 1));
+    app.ask_licence_if_new();
+    assert!(app.ask_licence);
+    frame_with(&ctx, &mut app, &[], &[]);
+    app.ask_licence = false;
     app.licence_use = None;
     app.licence.key = "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into();
     app.ask_licence_if_new();

@@ -10,7 +10,9 @@
 //! header says unitless (`$INSUNITS` 0 where the version has it) and the
 //! extents are the page. Every colour is one layer named `COLOR_RRGGBB`
 //! with the nearest AutoCAD colour index, and every entity carries that
-//! index (group 62) and its exact colour (group 420). Every subpath is one
+//! index (group 62) and, in the spline mode's R2000 file, its exact colour
+//! (group 420; R12 has no such code, and Illustrator's AutoCAD import
+//! refuses an R12 file that carries one). Every subpath is one
 //! outline, closed when the SVG closes it or fills it (a fill closes every
 //! subpath), open otherwise. Opacity has no place in these entities and is
 //! not written.
@@ -24,8 +26,12 @@
 //! section, the nine symbol tables with their standard entries (linetypes
 //! ByBlock, ByLayer and Continuous, layer 0, text and dimension style
 //! Standard, application ACAD, the model and paper space block records),
-//! the two space blocks, a handle and an owner on every object, and the
-//! `OBJECTS` section's root dictionary with its `ACAD_GROUP` dictionary.
+//! every layer's lineweight (default) and plot style (group 390, the
+//! `Normal` placeholder of the `ACAD_PLOTSTYLENAME` dictionary: without it
+//! Illustrator's AutoCAD import refuses the file, measured September 24,
+//! 2026), the two space blocks, a handle and an owner on every object, and
+//! the `OBJECTS` section's root dictionary with its `ACAD_GROUP` and
+//! `ACAD_PLOTSTYLENAME` dictionaries.
 //! There each run of cubic pieces is one `SPLINE` (degree 3, the Bezier
 //! pieces' own control points under a knot vector with multiplicity 3 at
 //! interior joins and 4 at the ends) and each run of straight pieces an
@@ -177,11 +183,14 @@ impl Dxf {
         self.pair(code + 20, "0.0");
     }
 
-    /// The layer and colours every entity carries.
-    fn paint(&mut self, layer: &Layer) {
+    /// The layer and colours every entity carries: the exact colour too
+    /// when the version has a code for it.
+    fn paint(&mut self, layer: &Layer, true_colour: bool) {
         self.pair(8, &layer.name);
         self.pair(62, layer.index);
-        self.pair(420, layer.colour);
+        if true_colour {
+            self.pair(420, layer.colour);
+        }
     }
 }
 
@@ -201,8 +210,10 @@ fn num(value: f64) -> String {
 }
 
 /// The colour AutoCAD shows for index 1 to 255: seven named colours and two
-/// greys, then 24 hues 15 degrees apart in ten shades each (value 100%, 65%,
-/// 50%, 30% and 15%, each also half-way to white first), then six greys.
+/// greys, then 24 hues 15 degrees apart in ten shades each (value 100%, 80%,
+/// 60%, 50% and 30%, each also half-way to white first), then six greys.
+/// Read back from Illustrator's AutoCAD import, one line per index, all 255
+/// alike (September 24, 2026).
 fn index_colour(index: u8) -> [u8; 3] {
     match index {
         0 | 7 => [255, 255, 255],
@@ -227,7 +238,7 @@ fn index_colour(index: u8) -> [u8; 3] {
                 4 => (f, 0., 1.),
                 _ => (1., 0., 1. - f),
             };
-            let value = [1., 0.65, 0.5, 0.3, 0.15][usize::from(shade / 2)];
+            let value = [1., 0.8, 0.6, 0.5, 0.3][usize::from(shade / 2)];
             let channel = |c: f64| {
                 let c = 255. * c;
                 let c = if shade % 2 == 1 {
@@ -240,7 +251,7 @@ fn index_colour(index: u8) -> [u8; 3] {
             [channel(r), channel(g), channel(b)]
         }
         250..=255 => {
-            let grey = [51, 80, 105, 130, 190, 255][usize::from(index - 250)];
+            let grey = [51, 91, 132, 173, 214, 255][usize::from(index - 250)];
             [grey, grey, grey]
         }
     }
@@ -391,7 +402,7 @@ fn r12(
         }
         let layer = &layers[outline.layer];
         dxf.pair(0, "POLYLINE");
-        dxf.paint(layer);
+        dxf.paint(layer, false);
         dxf.pair(66, 1);
         dxf.xyz(10, (0., 0.));
         dxf.pair(70, u8::from(outline.closed));
@@ -444,6 +455,7 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     let mut h = Handles(0);
     let (vport, ltype, layer, style, view) = (h.next(), h.next(), h.next(), h.next(), h.next());
     let (ucs, appid, dimstyle, records) = (h.next(), h.next(), h.next(), h.next());
+    let (plot_styles, normal) = (h.next(), h.next());
     let mut dxf = Dxf::default();
     dxf.pair(0, "SECTION");
     dxf.pair(2, "CLASSES");
@@ -475,6 +487,8 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
         entry(&mut dxf, "LAYER", &h.next(), &layer, class, name);
         dxf.pair(62, index);
         dxf.pair(6, "Continuous");
+        dxf.pair(370, -3);
+        dxf.pair(390, &normal);
     }
     dxf.pair(0, "ENDTAB");
     table(&mut dxf, "STYLE", &style, 1);
@@ -567,11 +581,25 @@ fn r2000(page: &Page, layers: &[Layer], outlines: &[Outline]) -> String {
     dxf.pair(281, 1);
     dxf.pair(3, "ACAD_GROUP");
     dxf.pair(350, &groups);
+    dxf.pair(3, "ACAD_PLOTSTYLENAME");
+    dxf.pair(350, &plot_styles);
     dxf.pair(0, "DICTIONARY");
     dxf.pair(5, &groups);
     dxf.pair(330, &root);
     dxf.pair(100, "AcDbDictionary");
     dxf.pair(281, 1);
+    dxf.pair(0, "ACDBDICTIONARYWDFLT");
+    dxf.pair(5, &plot_styles);
+    dxf.pair(330, &root);
+    dxf.pair(100, "AcDbDictionary");
+    dxf.pair(281, 1);
+    dxf.pair(3, "Normal");
+    dxf.pair(350, &normal);
+    dxf.pair(100, "AcDbDictionaryWithDefault");
+    dxf.pair(340, &normal);
+    dxf.pair(0, "ACDBPLACEHOLDER");
+    dxf.pair(5, &normal);
+    dxf.pair(330, &plot_styles);
     dxf.pair(0, "ENDSEC");
     dxf.pair(0, "EOF");
 
@@ -601,7 +629,7 @@ fn spline_outline(dxf: &mut Dxf, h: &mut Handles, owner: &str, layer: &Layer, ou
         dxf.pair(5, h.next());
         dxf.pair(330, owner);
         dxf.pair(100, "AcDbEntity");
-        dxf.paint(layer);
+        dxf.paint(layer, true);
         dxf.pair(100, class);
     };
     let polyline = |dxf: &mut Dxf, h: &mut Handles, points: &[Xy], closed: bool| {

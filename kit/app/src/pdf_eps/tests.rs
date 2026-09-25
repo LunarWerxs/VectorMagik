@@ -72,6 +72,20 @@ fn a_translucent_group_is_one_transparency_group_and_eps_refuses_it() {
     assert!(error.contains("transparency"), "{error}");
 }
 
+/// Illustrator flattens a plain `q`/`Q` and keeps a clipped one as a clip
+/// group (measured September 24, 2026), so every opaque group is clipped to
+/// the page, found in its own user space under the translations above it.
+#[test]
+fn every_opaque_group_is_clipped_to_the_page_so_editors_keep_it() {
+    let svg = "<svg width=\"20pt\" height=\"10pt\" viewBox=\"-2 0 40 20\"><g id=\"#ff0000ff\"><path fill=\"#ff0000\" d=\"M 0 0 L 10 0 L 10 10 Z\" /></g><g transform=\"translate(5 1)\"><g><path fill=\"#0000ff\" d=\"M 0 0 L 1 0 L 1 1 Z\" /></g></g></svg>";
+    let body = content(&to_pdf(svg).unwrap());
+    assert!(body.contains("q\n-2 0 40 20 re W n\n1 0 0 rg\n"), "{body}");
+    assert!(
+        body.contains("q\n-2 0 40 20 re W n\n1 0 0 1 5 1 cm\nq\n-7 -1 40 20 re W n\n0 0 1 rg\n"),
+        "{body}"
+    );
+}
+
 #[test]
 fn eps_fills_then_strokes_one_path_and_starts_on_white() {
     let svg = "<svg width=\"8\" height=\"4\" viewBox=\"0 0 8 4\"><path fill=\"#ffffff\" stroke=\"#000000\" stroke-width=\"0.5\" stroke-linejoin=\"round\" d=\"M 1 1 L 7 1 L 7 3 Z\" /></svg>";
@@ -104,6 +118,8 @@ const EVERY_BRANCH: &str = "<svg width=\"120\" height=\"90\" viewBox=\"-5 -5 160
 /// The PDF and EPS of the drawings above and three frozen reference
 /// documents, fingerprinted before the reader was changed to keep each
 /// path's segments (September 24, 2026): the writers must not move a byte.
+/// The PDFs of the three references moved once since, on purpose, when
+/// each colour group was clipped to the page (the same evening).
 #[test]
 fn pdf_and_eps_bytes_are_unchanged_by_the_structured_reader() {
     let references = [
@@ -140,11 +156,11 @@ fn pdf_and_eps_bytes_are_unchanged_by_the_structured_reader() {
         fingerprint(&to_eps(&opaque).unwrap()),
     ));
     let expected: [(&str, &str, u64); 8] = [
-        ("logo-with-blending-small-high", "pdf", 7387381173290135551),
+        ("logo-with-blending-small-high", "pdf", 12572814889323566374),
         ("logo-with-blending-small-high", "eps", 10622153357145488776),
-        ("coffee-low", "pdf", 10339105553459247774),
+        ("coffee-low", "pdf", 9032009065180905887),
         ("coffee-low", "eps", 8569045390153395527),
-        ("astronaut-low", "pdf", 2692276451641380159),
+        ("astronaut-low", "pdf", 12434725446547735941),
         ("astronaut-low", "eps", 17390289305250369645),
         ("every-branch", "pdf", 303380013723139878),
         ("every-branch", "eps", 3328680109805976187),

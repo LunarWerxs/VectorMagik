@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (September 24, 2026)
+
+- DXF files open in Adobe Illustrator and other AutoCAD-based readers: the "lines" modes no
+  longer carry a color code their DXF version lacks, and the "spline curves" mode gives
+  every layer the plot style AutoCAD expects. The "lines" modes pick colors from AutoCAD's
+  own palette.
+- Shapes grouped by color stay grouped when a PDF or AI file is opened in Illustrator.
+- Not sure yet? The first-run question offers commercial use free for 24 hours, no key and
+  no payment; afterwards the app asks once more.
+
 ## 0.4.0 (September 24, 2026)
 
 - Photoshop PSD and PSB open and are traced like any picture, as TIFF and TGA do. SVG, PDF,
