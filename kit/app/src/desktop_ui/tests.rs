@@ -1139,6 +1139,55 @@ fn one_to_one_is_in_reach_whatever_the_fit() {
 }
 
 #[test]
+fn a_small_picture_comes_up_whole_times_bigger_and_offers_its_sizes() {
+    let ctx = egui::Context::default();
+    let mut app = converted(&ctx);
+    app.set_view(View::Overlay, true);
+    // The owner's window, where a 208 px screenshot sat at its own size, lost
+    // in the middle (September 26, 2026).
+    let frame = |app: &mut Desktop, keys: &[Key]| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1611., 1371.),
+                )),
+                events: keys
+                    .iter()
+                    .map(|&key| egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+            |ctx| app.ui(ctx),
+        );
+    };
+    for _ in 0..3 {
+        frame(&mut app, &[]);
+    }
+    let room = app.room_fit().unwrap();
+    assert!(
+        app.fit >= 2. && app.fit.fract() == 0. && app.fit <= room,
+        "the 250 px logo comes up at {} with room for {room}",
+        app.fit
+    );
+    assert_eq!(app.whole_sizes(), [1., 2., 3.]);
+    for (key, times) in [(Key::Num1, 1.), (Key::Num2, 2.), (Key::Num3, 3.)] {
+        frame(&mut app, &[key]);
+        assert!(
+            (app.fit * app.zoom - times).abs() < 1e-4,
+            "{key:?} shows {}",
+            app.fit * app.zoom
+        );
+    }
+}
+
+#[test]
 fn a_picture_over_the_engine_limit_loads_scaled_and_converts() {
     let ctx = egui::Context::default();
     let wide = scratch("wide.png");

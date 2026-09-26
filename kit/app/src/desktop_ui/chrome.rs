@@ -40,6 +40,8 @@ impl Desktop {
         let mut drawn = [false; 2];
         let mut zoom_to: Option<f32> = None;
         let mut fit = false;
+        let mut fit_scroll = false;
+        let (sizes, shown_scale) = (self.whole_sizes(), self.fit * self.zoom);
         egui::TopBottomPanel::bottom("status")
             // Its left edge lines up with the picture cards above it (the
             // workspace keeps 6 px beside the rail, 12 without one).
@@ -126,10 +128,29 @@ impl Desktop {
                             zoom_to = Some(self.zoom / ZOOM_STEP);
                         }
                         if pill(ui, "Fit")
-                            .on_hover_text("Fit the picture to its card  (F)")
+                            .on_hover_text("Size the picture to the space  (F)")
                             .clicked()
                         {
                             fit = true;
+                        }
+                        // A small picture offers whole sizes: its pixels stay
+                        // square, and the vector shows what it gained.
+                        if show_size {
+                            for n in sizes.iter().rev() {
+                                let label = format!("{n}\u{00D7}");
+                                let tip = match *n as u32 {
+                                    1 => "The picture at its own size  (1)".to_owned(),
+                                    k @ 2..=3 => format!("The picture {k} times bigger  ({k})"),
+                                    k => format!("The picture {k} times bigger"),
+                                };
+                                if stat(ui, "", &label, (shown_scale - n).abs() < 1e-3)
+                                    .on_hover_text(tip)
+                                    .clicked()
+                                {
+                                    zoom_to = Some(n / self.fit);
+                                    fit_scroll = true;
+                                }
+                            }
                         }
                         ui.add_space(8.);
                         if let (Some((nodes, colors)), true) = (stats, show_detail) {
@@ -188,6 +209,9 @@ impl Desktop {
             });
         if let Some(zoom) = zoom_to {
             self.set_zoom(zoom);
+        }
+        if fit_scroll {
+            self.scroll = Vec2::ZERO;
         }
         if fit {
             self.set_zoom(1.);

@@ -849,7 +849,11 @@ pub(super) fn shortcuts(ui: &mut egui::Ui, entries: &[(String, &str)]) {
 /// A footer stat: a chip that reacts to the pointer and can be lit up when
 /// what it stands for is active.
 pub(super) fn stat(ui: &mut egui::Ui, glyph: &str, text: &str, active: bool) -> egui::Response {
-    let label = format!("{glyph} {text}");
+    let label = if glyph.is_empty() {
+        text.to_owned()
+    } else {
+        format!("{glyph} {text}")
+    };
     let font = FontId::proportional(12.);
     let width = ui
         .painter()

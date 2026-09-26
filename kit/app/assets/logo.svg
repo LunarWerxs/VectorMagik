@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-<rect x="2" y="2" width="60" height="60" rx="15" fill="#17222a"/>
-<path d="M14 46 L22 14 M50 18 L42 50" stroke="#1f6b64" stroke-width="1.5"/>
-<path d="M14 46 C22 14 42 50 50 18" fill="none" stroke="#4fd1c5" stroke-width="4.5" stroke-linecap="round"/>
-<rect x="10" y="42" width="8" height="8" fill="#4fd1c5" stroke="#062a27" stroke-width="1.5"/>
-<rect x="46" y="14" width="8" height="8" fill="#4fd1c5" stroke="#062a27" stroke-width="1.5"/>
-<rect x="28" y="28" width="8" height="8" fill="#4fd1c5" stroke="#062a27" stroke-width="1.5"/>
+<rect x="2" y="2" width="60" height="60" rx="15" fill="#1c1c20"/>
+<path d="M14 46 L22 14 M50 18 L42 50" stroke="#1d4f8c" stroke-width="1.5"/>
+<path d="M14 46 C22 14 42 50 50 18" fill="none" stroke="#0a84ff" stroke-width="4.5" stroke-linecap="round"/>
+<rect x="10" y="42" width="8" height="8" fill="#0a84ff" stroke="#03224a" stroke-width="1.5"/>
+<rect x="46" y="14" width="8" height="8" fill="#0a84ff" stroke="#03224a" stroke-width="1.5"/>
+<rect x="28" y="28" width="8" height="8" fill="#0a84ff" stroke="#03224a" stroke-width="1.5"/>
 </svg>

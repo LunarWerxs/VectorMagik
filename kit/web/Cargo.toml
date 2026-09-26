@@ -1,6 +1,6 @@
 [package]
 name = "vectormagik-web"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
 description = "VectorMagik in the browser: the desktop app as WebAssembly, drawn on a canvas"

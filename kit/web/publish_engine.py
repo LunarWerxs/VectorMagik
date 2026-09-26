@@ -5,9 +5,12 @@
 Builds kit/web (the desktop app for a canvas) for wasm32-unknown-unknown
 (offline, into work/rust-target), checks it in Node against the command
 line's drawings (kit/web/js/test.mjs), then copies the module and its page
-runtime (js/app.mjs) into <site>/public/engine/.
+runtime (js/app.mjs) into <site>/public/engine/, with version.json: the app's
+version, which the site's build reads for its pages (the one copy of it).
 """
 import argparse
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +35,9 @@ def main():
     engine.mkdir(parents=True, exist_ok=True)
     shutil.copy2(WASM, engine / 'vectormagik_web.wasm')
     shutil.copy2(ROOT / 'kit/web/js/app.mjs', engine / 'app.mjs')
+    manifest = (ROOT / 'kit/app/Cargo.toml').read_text(encoding='utf-8')
+    version = re.search(r'^version = "([^"]+)"', manifest, re.M).group(1)
+    (engine / 'version.json').write_text(json.dumps({'version': version}) + '\n', encoding='utf-8')
     print(f'engine {WASM.stat().st_size / 1e6:.1f} MB copied into {engine}')
     return 0
 

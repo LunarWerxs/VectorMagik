@@ -38,7 +38,8 @@ impl Desktop {
                 // The cards hug the picture at its shown size and glide there
                 // (the owner: the drop zone "should animate ... to be the size
                 // of the thing you dropped in there", and a small picture was
-                // blown up to fill the window).
+                // blown up to fill the window; it now comes up a whole number
+                // of times bigger, to about half the space).
                 let overlay = self.view == View::Overlay;
                 let original_shown = overlay
                     && !(self.peek.unwrap_or(self.overlay_vector)
@@ -76,8 +77,8 @@ impl Desktop {
             });
     }
 
-    /// Where the picture cards go: each the picture at its shown size (fit
-    /// to the space, never enlarged past its own pixels, times the zoom) plus
+    /// Where the picture cards go: each the picture at its shown size
+    /// (`picture_fit` to the space, times the zoom) plus
     /// the card's heading and margin, no larger than the space, the pair side
     /// by side or one above the other, centred a little above the middle.
     /// Records the full-size body the fit is measured against. The flag says
@@ -374,8 +375,7 @@ impl Desktop {
             None => Vec::new(),
         };
         // Measured against the card's full-size body, so a card hugging a
-        // small picture keeps its fit, and never past the picture's own
-        // pixels: a small picture is shown small, not blown up.
+        // small picture keeps its fit.
         let viewport = self.fit_area.unwrap_or_else(|| ui.available_size());
         let fit = picture_fit(viewport, Vec2::new(w, h));
         if (!vector || self.view == View::Overlay) && (self.fit - fit).abs() > 1e-6 {
@@ -1209,12 +1209,62 @@ const CARD_HEADING: f32 = 42.;
 /// How long a card takes to glide to a new place or size, in seconds.
 const GLIDE: f64 = 0.26;
 
-/// The scale that fits `picture` in `body` with a 12 px margin all round,
-/// never above 1: a picture is shown at most at its own size.
+/// How much of the space a small picture comes up to fill, along its tighter
+/// side, and the most times it is enlarged.
+const ENLARGE_SHARE: f32 = 0.55;
+const MOST_ENLARGED: f32 = 8.;
+
+/// How many times `picture` fits in `body` with a 12 px margin all round.
+fn room_scale(body: Vec2, picture: Vec2) -> f32 {
+    ((body.x - 24.) / picture.x).min((body.y - 24.) / picture.y)
+}
+
+/// The scale a picture is shown at before any zoom: one larger than `body`
+/// shrinks to fit it; a small one comes up a whole number of times bigger,
+/// to about half the space and never past it, so its pixels stay square
+/// (the owner, September 26, 2026: "if the page is really big and the image
+/// is really tiny, it should probably kind of, like, make it bigger").
 fn picture_fit(body: Vec2, picture: Vec2) -> f32 {
-    ((body.x - 24.) / picture.x)
-        .min((body.y - 24.) / picture.y)
-        .clamp(0.01, 1.)
+    let room = room_scale(body, picture);
+    if room < 1. {
+        return room.max(0.01);
+    }
+    (room * ENLARGE_SHARE)
+        .round()
+        .clamp(1., room.floor().min(MOST_ENLARGED))
+}
+
+impl Desktop {
+    /// How many times the open picture fits its card's full-size body as
+    /// last laid out; below 1 it has to shrink to fit.
+    pub(super) fn room_fit(&self) -> Option<f32> {
+        let (raster, body) = (self.raster.as_ref()?, self.fit_area?);
+        let margin = self.picture_margin();
+        Some(room_scale(
+            body,
+            Vec2::new(
+                raster.width as f32 + 2. * margin,
+                raster.height as f32 + 2. * margin,
+            ),
+        ))
+    }
+
+    /// The whole-number sizes offered for a small picture: 1×, 2× and 3× as
+    /// far as they fit the space, and the size it came up at when that is
+    /// more; none for a picture that 2× would not fit.
+    pub(super) fn whole_sizes(&self) -> Vec<f32> {
+        let Some(room) = self.room_fit().filter(|room| *room >= 2.) else {
+            return Vec::new();
+        };
+        let mut sizes: Vec<f32> = [1., 2., 3.]
+            .into_iter()
+            .filter(|n| *n <= room.floor())
+            .collect();
+        if self.fit > 3. && self.fit.fract() == 0. {
+            sizes.push(self.fit);
+        }
+        sizes
+    }
 }
 
 /// Where a gliding rectangle is going, where it started and when.

@@ -165,7 +165,13 @@ impl Desktop {
         if !ctx.wants_keyboard_input() {
             let (mut zoom_in, mut zoom_out, mut fit, mut actual, mut nodes, mut bitmap, mut vector) =
                 (false, false, false, false, false, false, false);
+            let mut whole = None;
             ctx.input_mut(|i| {
+                if i.consume_key(Modifiers::NONE, Key::Num2) {
+                    whole = Some(2.);
+                } else if i.consume_key(Modifiers::NONE, Key::Num3) {
+                    whole = Some(3.);
+                }
                 zoom_in = i.consume_key(Modifiers::NONE, Key::Plus)
                     || i.consume_key(Modifiers::NONE, Key::Equals)
                     || i.consume_key(Modifiers::SHIFT, Key::Plus)
@@ -196,6 +202,11 @@ impl Desktop {
             if actual {
                 let fit = self.fit;
                 self.set_zoom(1. / fit);
+            }
+            // 2 and 3: the picture that many times its own size.
+            if let Some(times) = whole {
+                let fit = self.fit;
+                self.set_zoom(times / fit);
             }
             if nodes {
                 self.nodes = !self.nodes;

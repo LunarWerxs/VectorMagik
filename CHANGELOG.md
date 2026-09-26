@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.4 (September 26, 2026)
+
+- A small picture comes up a whole number of times bigger, to about half the space (two or
+  three times on a big screen), instead of at its own size in the middle.
+- 1x, 2x and 3x beside Fit for a small picture, and the 2 and 3 keys.
+- The logo, window icon and Mac icon in the app's blue and greys.
+
 ## 0.5.3 (September 26, 2026)
 
 - A picture is shown at most at its own size: a small one is no longer blown up to fill
