@@ -35,7 +35,7 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac 
 - 🌐 **The whole app in your browser, too.** The desktop app itself, compiled to WebAssembly: your picture never leaves your computer.
 - 🔒 **Offline.** No account, no upload, no telemetry.
 - 💻 **Windows, Mac and Linux.** One folder, nothing to install; on Windows and Linux the settings stay beside the app. The Windows app is signed by LUNARWERX LLC.
-- 🎨 **Three looks, light or dark.** Classic, or preview Glass and Studio, a new design after Apple's.
+- 🎨 **Two looks, light or dark.** Studio, or Glass, after Apple's current design.
 - 🧾 **Free** for personal use under PolyForm Noncommercial; [commercial licenses](https://vectormagik.lunarwerx.com/#license) are US$9 a month per seat.
 
 <div align="center">

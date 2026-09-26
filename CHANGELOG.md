@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.4 (September 25, 2026)
+
+- A calmer window. The toolbar shows the picture's name as its title beside Open, Convert,
+  Save and Close (the typed path field and the window-snapshot button are gone; the
+  snapshot keeps its shortcut). The sidebar opens with Conversion and Curves only, the
+  other cards fold to one line, and the switches most pictures never need sit under More
+  options; no switch carries an explanation line any more (hover for it). The footer
+  dropped the segments chip, the zoom slider and 1:1 (click the zoom figure for 1:1).
+- Studio is the default look and Classic is gone (a saved Classic opens as Studio).
+  Glass is plain grey glass, without the purple and blue light behind it, and the cards'
+  shadows are no longer cut off at the sidebar's edges and under the header.
+- In the browser, the site's menu folds up out of the app's way: point at the window's
+  top edge (or tap the handle there) to bring it down.
+
 ## 0.4.3 (September 25, 2026)
 
 - Every rounded corner gets two nodes. On a large rounded square one corner could come

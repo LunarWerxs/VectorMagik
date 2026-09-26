@@ -11,10 +11,6 @@ impl Desktop {
             (Some((_, nodes)), Some((_, segments))) => Some((nodes, segments, palette)),
             _ => None,
         };
-        let raw_stats = match (node_counts, segment_counts) {
-            (Some((nodes, _)), Some((segments, _))) => Some((nodes, segments)),
-            _ => None,
-        };
         // The picture opened, also when the engine traced a scaled copy.
         let raster_size = self
             .raster
@@ -22,11 +18,9 @@ impl Desktop {
             .map(|r| self.source_size.unwrap_or((r.width, r.height)));
         let output = self.output_size().filter(|_| self.enlarged());
         let mut toggle_nodes = false;
-        let mut toggle_simplify = false;
         let mut open: Option<StatPopup> = None;
         let mut drawn = [false; 2];
         let mut zoom_to: Option<f32> = None;
-        let zoom_range = self.zoom_range();
         let mut fit = false;
         egui::TopBottomPanel::bottom("status")
             .frame(bar_frame(6, false))
@@ -74,44 +68,40 @@ impl Desktop {
                         if raster_size.is_none() {
                             return;
                         }
-                        // Right-to-left: the zoom group sits at the far right.
-                        ui.label(
-                            RichText::new(format!("{:.0}%", self.fit * self.zoom * 100.))
-                                .size(12.)
-                                .color(pal().dim),
-                        )
-                        .on_hover_text(
-                            "Zoom. Ctrl+scroll over a picture zooms around the pointer.",
-                        );
+                        // Right-to-left: the zoom group sits at the far right:
+                        // minus, the zoom (a click shows one source pixel per
+                        // screen pixel), plus, then Fit.
                         if small_button(ui, "+")
                             .on_hover_text("Zoom in  (+)")
                             .clicked()
                         {
                             zoom_to = Some(self.zoom * ZOOM_STEP);
                         }
-                        ui.spacing_mut().slider_width = 74.;
-                        let mut zoom = self.zoom;
                         if ui
                             .add(
-                                egui::Slider::new(&mut zoom, zoom_range.clone())
-                                    .logarithmic(true)
-                                    .show_value(false),
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "{:.0}%",
+                                        self.fit * self.zoom * 100.
+                                    ))
+                                    .size(12.)
+                                    .color(pal().dim),
+                                )
+                                .sense(egui::Sense::click()),
                             )
-                            .changed()
+                            .on_hover_text(
+                                "Click for one source pixel per screen pixel  (1). \
+                                 Ctrl+scroll over a picture zooms around the pointer.",
+                            )
+                            .clicked()
                         {
-                            zoom_to = Some(zoom);
+                            zoom_to = Some(1. / self.fit);
                         }
                         if small_button(ui, "\u{2212}")
                             .on_hover_text("Zoom out  (-)")
                             .clicked()
                         {
                             zoom_to = Some(self.zoom / ZOOM_STEP);
-                        }
-                        if pill(ui, "1:1")
-                            .on_hover_text("One source pixel per screen pixel  (1)")
-                            .clicked()
-                        {
-                            zoom_to = Some(1. / self.fit);
                         }
                         if pill(ui, "Fit")
                             .on_hover_text("Fit the picture to its card  (F)")
@@ -120,8 +110,7 @@ impl Desktop {
                             fit = true;
                         }
                         ui.add_space(8.);
-                        if let (Some((nodes, segments, colors)), true) = (stats, show_detail) {
-                            let (raw_nodes, raw_segments) = raw_stats.unwrap_or((nodes, segments));
+                        if let (Some((nodes, _, colors)), true) = (stats, show_detail) {
                             let tip = if self.nodes {
                                 "Curve nodes are shown. Click to hide them.  (N)"
                             } else {
@@ -132,25 +121,6 @@ impl Desktop {
                                 .clicked()
                             {
                                 toggle_nodes = true;
-                            }
-                            let tip = if self.simplify {
-                                format!(
-                                    "Simplified from the traced {raw_segments} segments and \
-                                     {raw_nodes} nodes. Click to show the exact traced curves."
-                                )
-                            } else {
-                                "The exact traced curves. Click to simplify them.".to_owned()
-                            };
-                            if stat(
-                                ui,
-                                icon::SEGMENTS,
-                                &format!("{segments} segments"),
-                                self.simplify,
-                            )
-                            .on_hover_text(tip)
-                            .clicked()
-                            {
-                                toggle_simplify = true;
                             }
                             let colors_chip = stat(
                                 ui,
@@ -203,10 +173,6 @@ impl Desktop {
         }
         if toggle_nodes {
             self.nodes = !self.nodes;
-        }
-        if toggle_simplify {
-            self.simplify = !self.simplify;
-            self.reapply();
         }
         // A popup whose chip is no longer drawn (the window got narrow) has
         // nothing to hang from.
@@ -436,13 +402,6 @@ impl Desktop {
                     }
                 }
             });
-            if self.look != Look::Classic {
-                ui.label(
-                    RichText::new("Glass and Studio preview a new design.")
-                        .size(11.5)
-                        .color(pal().faint),
-                );
-            }
             ui.add_space(2.);
             ui.label(RichText::new("Light or dark").size(12.5).color(pal().dim));
             if platform::IN_BROWSER {

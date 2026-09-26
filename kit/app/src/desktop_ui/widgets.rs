@@ -116,13 +116,8 @@ pub(super) fn card(
                     ui.spacing_mut().item_spacing.x = 8.;
                     let p = pal();
                     ui.label(RichText::new(glyph).size(13.).color(p.accent));
-                    // Classic's small capitals in the accent; the other looks
-                    // title their cards the way a Mac sidebar does.
-                    let heading = if p.heading_upper {
-                        RichText::new(title.to_uppercase()).size(11.5)
-                    } else {
-                        RichText::new(title).size(13.)
-                    };
+                    // Titled the way a Mac sidebar titles its sections.
+                    let heading = RichText::new(title).size(13.);
                     ui.add(
                         egui::Label::new(heading.family(family.clone()).color(p.heading))
                             .selectable(false),
@@ -162,6 +157,34 @@ pub(super) fn card(
                 body(ui);
             });
         });
+}
+
+/// Settings most pictures never need, folded under a quiet "More options"
+/// row that opens them in place; open or folded is remembered for the
+/// session.
+pub(super) fn more_options(ui: &mut egui::Ui, name: &str, body: impl FnOnce(&mut egui::Ui)) {
+    let id = ui.make_persistent_id(("more-options", name));
+    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    ui.add_space(2.);
+    let label = RichText::new(if open {
+        "Fewer options"
+    } else {
+        "More options"
+    })
+    .size(12.)
+    .color(pal().accent);
+    if ui
+        .add(egui::Label::new(label).sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        open = !open;
+        ui.data_mut(|d| d.insert_temp(id, open));
+    }
+    reveal(ui, name, open, |ui| {
+        ui.add_space(2.);
+        body(ui);
+    });
 }
 
 /// The frame of a card: the rail's cards and the two picture cards.
@@ -547,7 +570,8 @@ pub(super) fn bar_frame(vertical: i8, top: bool) -> egui::Frame {
     if !p.floating {
         return frame;
     }
-    let (above, below) = if top { (10, 4) } else { (4, 10) };
+    // Room for the shadow below the header and below the status bar.
+    let (above, below) = if top { (10, 10) } else { (4, 10) };
     frame
         .corner_radius(22)
         .stroke(Stroke::new(1_f32, p.card_stroke))
@@ -935,17 +959,10 @@ pub(super) fn apply_theme(ctx: &egui::Context, title_family: FontFamily) {
     visuals.panel_fill = p.backdrop;
     visuals.window_fill = p.popup;
     visuals.window_stroke = Stroke::new(1_f32, p.border);
-    let radius = if p.look == Look::Classic {
-        10
-    } else {
-        p.card_radius
-    };
-    visuals.window_corner_radius = CornerRadius::same(radius);
-    visuals.menu_corner_radius = CornerRadius::same(radius);
-    if p.look != Look::Classic {
-        visuals.window_shadow = p.popup_shadow;
-        visuals.popup_shadow = p.popup_shadow;
-    }
+    visuals.window_corner_radius = CornerRadius::same(p.card_radius);
+    visuals.menu_corner_radius = CornerRadius::same(p.card_radius);
+    visuals.window_shadow = p.popup_shadow;
+    visuals.popup_shadow = p.popup_shadow;
     visuals.extreme_bg_color = p.field;
     visuals.faint_bg_color = p.surface_high;
     visuals.code_bg_color = p.field;

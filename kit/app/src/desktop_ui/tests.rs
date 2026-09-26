@@ -1807,11 +1807,11 @@ fn hold_shows_the_other_picture_only_while_it_is_held() {
 
 #[test]
 fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
-    let classic = (Look::Classic, ThemeChoice::Dark, None);
-    let text = prefs::write_prefs((true, false), &Default::default(), classic);
+    let studio = (Look::Studio, ThemeChoice::Dark, None);
+    let text = prefs::write_prefs((true, false), &Default::default(), studio);
     assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
     assert!(!text.contains("licence"));
-    assert_eq!(prefs::parse_appearance(&text), classic);
+    assert_eq!(prefs::parse_appearance(&text), studio);
     // The look, light or dark and the first-run answer ride along; words
     // not understood keep the defaults.
     let chosen = (
@@ -1823,7 +1823,7 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
     assert_eq!(prefs::parse_appearance(&text), chosen);
     // A free commercial trial keeps when it began.
     let trial = (
-        Look::Classic,
+        Look::Studio,
         ThemeChoice::Dark,
         Some(LicenceUse::Trial(1_758_700_000)),
     );
@@ -1831,8 +1831,8 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
     assert!(text.contains("licence_use=trial:1758700000\r\n"), "{text}");
     assert_eq!(prefs::parse_appearance(&text), trial);
     assert_eq!(
-        prefs::parse_appearance("look=paisley\ntheme=sepia\nlicence_use=maybe\n"),
-        classic
+        prefs::parse_appearance("look=classic\ntheme=sepia\nlicence_use=maybe\n"),
+        studio
     );
     // A licence rides along; a key that is not shaped like one is dropped,
     // and its certificate with it.
@@ -1840,7 +1840,7 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
         key: "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into(),
         certificate: "payload.signature".into(),
     };
-    let text = prefs::write_prefs((true, false), &licence, classic);
+    let text = prefs::write_prefs((true, false), &licence, studio);
     assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
     assert_eq!(prefs::parse_licence(&text), licence);
     assert_eq!(

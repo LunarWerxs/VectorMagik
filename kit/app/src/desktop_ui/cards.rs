@@ -13,19 +13,18 @@ impl Desktop {
                 ui.horizontal(|ui| {
                     let full = ui.max_rect();
                     let gap = 8.;
-                    // What the toolbar needs besides the path field: the icon
-                    // buttons, Convert, the two view chips, the Appearance
-                    // button and the gaps. In a narrow window the title's
-                    // words give way first, then the field shrinks.
-                    let icons = if platform::IN_BROWSER { 3. } else { 5. };
-                    let fixed = 36. * icons + 112. + 96. + 70. + 36. + gap * 10. + 6.;
-                    let title = 30. + 10. + 140. + 12.;
+                    // What the toolbar needs besides the picture's name: the
+                    // three icon buttons, Convert, the two view chips, the
+                    // Appearance button and the gaps. In a narrow window the
+                    // app's name gives way first, then the picture's.
+                    let fixed = 36. * 3. + 112. + 96. + 70. + 36. + gap * 8. + 6.;
+                    let title = 30. + 10. + 110. + 12.;
                     let show_title = full.width() - title - fixed >= 160.;
                     let lead = if show_title { title } else { 30. + 12. };
-                    let field_width = (full.width() * 0.34)
-                        .clamp(200., 560.)
+                    let name_width = (full.width() * 0.24)
+                        .clamp(140., 360.)
                         .min(full.width() - lead - fixed - 8.)
-                        .max(120.);
+                        .max(80.);
                     ui.spacing_mut().item_spacing.x = 10.;
                     if let Some(logo) = &self.logo {
                         ui.add(egui::Image::new(egui::load::SizedTexture::new(
@@ -34,29 +33,17 @@ impl Desktop {
                         )));
                     }
                     if show_title {
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 0.;
-                            ui.set_min_width(140.);
-                            ui.label(
-                                RichText::new("VectorMagik")
-                                    .size(17.)
-                                    .family(family.clone())
-                                    .color(pal().text),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new("Offline raster to vector")
-                                        .size(11.)
-                                        .color(pal().dim),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                            );
-                        });
+                        ui.label(
+                            RichText::new("VectorMagik")
+                                .size(17.)
+                                .family(family.clone())
+                                .color(pal().text),
+                        );
                     }
                     // The toolbar sits centred in the window, not in what is
-                    // left beside the title: the icon buttons, Convert, the
-                    // path field and the two view chips as one group.
-                    let group_width = 36. * icons + 112. + field_width + 96. + 70. + gap * 9.;
+                    // left beside the title: Open, the picture's name, Convert,
+                    // Save, Close and the two view chips as one group.
+                    let group_width = 36. * 3. + 112. + name_width + 96. + 70. + gap * 7.;
                     let start = (full.center().x - group_width / 2.).max(ui.cursor().min.x + 12.);
                     ui.add_space((start - ui.cursor().min.x).max(0.));
                     ui.spacing_mut().item_spacing.x = gap;
@@ -69,31 +56,32 @@ impl Desktop {
                     {
                         actions.open = true;
                     }
-                    let can_load = idle && !self.path.trim().is_empty();
-                    // A browser tab has no paths: the field shows the open
-                    // picture's name, and pictures come from the file chooser
-                    // or a drop.
-                    let field = ui.add_enabled(
-                        idle && !platform::IN_BROWSER,
-                        egui::TextEdit::singleline(&mut self.path)
-                            .desired_width(field_width)
-                            .margin(Margin::symmetric(12, 8))
-                            .hint_text(if platform::IN_BROWSER {
-                                "Open a picture, or drop one on the page"
-                            } else {
-                                "Image path \u{2014} or drag a file into the window"
-                            }),
+                    // The picture's name where a document window shows its
+                    // title (a typed path field before September 25, 2026;
+                    // pictures come from Open or a drop), its path on hover.
+                    let has_image = self.raster.is_some();
+                    let name = std::path::Path::new(&self.loaded_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .filter(|_| has_image);
+                    let (text, color) = match &name {
+                        Some(name) => (name.as_str(), pal().text),
+                        None => ("No image", pal().faint),
+                    };
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(name_width, 32.),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(name_width);
+                            let label = ui.add(
+                                egui::Label::new(RichText::new(text).size(13.5).color(color))
+                                    .truncate(),
+                            );
+                            if name.is_some() && !platform::IN_BROWSER {
+                                label.on_hover_text(&self.loaded_path);
+                            }
+                        },
                     );
-                    if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && can_load {
-                        actions.load = true;
-                    }
-                    if !platform::IN_BROWSER
-                        && icon_button(ui, icon::LOAD, can_load)
-                            .on_hover_text("Load the image at this path  (Enter)")
-                            .clicked()
-                    {
-                        actions.load = true;
-                    }
                     let can_convert =
                         idle && self.raster.is_some() && self.path == self.loaded_path;
                     if self.worker.is_some() {
@@ -139,20 +127,6 @@ impl Desktop {
                     if save.clicked() {
                         actions.save = true;
                     }
-                    // The window's own picture, for reports; in a tab it only
-                    // downloaded a screenshot the visitors of September 24,
-                    // 2026 took for a camera that went wrong.
-                    if !platform::IN_BROWSER
-                        && icon_button(ui, icon::CAMERA, idle)
-                            .on_hover_text(format!(
-                                "Save this window as a PNG  ({})",
-                                ctx.format_shortcut(&SC_PREVIEW)
-                            ))
-                            .clicked()
-                    {
-                        actions.preview = true;
-                    }
-                    let has_image = self.raster.is_some();
                     if icon_button(ui, icon::CLOSE, idle && has_image)
                         .on_hover_text(format!(
                             "Close the image  ({})",
@@ -227,8 +201,8 @@ impl Desktop {
                     .fill(pal().rail_fill())
                     .inner_margin(Margin {
                         left: 12,
-                        right: 6,
-                        top: 12,
+                        right: SHADOW_REACH,
+                        top: 12 - SHADOW_REACH,
                         bottom: 10,
                     }),
             )
@@ -270,7 +244,17 @@ impl Desktop {
                             .scroll_bar_visibility(
                                 egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
                             )
-                            .show(ui, |ui| self.rail_cards(ui, &family));
+                            .show(ui, |ui| {
+                                // The cards' shadows paint into the rail's
+                                // margins beside the list, which clips at
+                                // the cards' own edges otherwise.
+                                let clip = ui.clip_rect();
+                                ui.set_clip_rect(egui::Rect::from_min_max(
+                                    egui::pos2(clip.min.x - 12., clip.min.y),
+                                    egui::pos2(clip.max.x + f32::from(SHADOW_REACH), clip.max.y),
+                                ));
+                                self.rail_cards(ui, &family)
+                            });
                         self.rail_scroll_bar(
                             ui,
                             out.id,
@@ -364,14 +348,18 @@ impl Desktop {
     }
 
     pub(super) fn rail_cards(&mut self, ui: &mut egui::Ui, family: &FontFamily) {
+        // Room above the first card and below the last for their shadows,
+        // at the list's top and scrolled to its end.
+        ui.add_space(f32::from(SHADOW_REACH));
         ui.spacing_mut().item_spacing.y = 10.;
         self.conversion_card(ui, family);
-        self.nodes_card(ui, family);
-        self.advanced_card(ui, family);
         self.curves_card(ui, family);
+        self.nodes_card(ui, family);
         self.shapes_card(ui, family);
         self.sticker_card(ui, family);
+        self.advanced_card(ui, family);
         self.licence_card(ui, family);
+        ui.add_space(1.);
     }
 
     /// The original's advanced dialog: segmentation complexity, contour
@@ -415,19 +403,14 @@ impl Desktop {
             !on,
             |ui| {
                 ui.add_enabled_ui(idle, |ui| {
-                    let switched = toggle_row(
-                        ui,
-                        &mut self.advanced_on,
-                        "Use the sliders",
-                        Some("Instead of the preset"),
-                    )
-                    .on_hover_text(
-                        "The original program's advanced mode: its three sliders replace the \
+                    let switched = toggle_row(ui, &mut self.advanced_on, "Use the sliders", None)
+                        .on_hover_text(
+                            "The original program's advanced mode: its three sliders replace the \
                      image type's preset (the type still decides anti-aliasing and photo \
                      seams). Starts from the settings the picture would get anyway, which \
                      the heading shows while this is off.",
-                    )
-                    .changed();
+                        )
+                        .changed();
                     if switched && self.advanced_on {
                         self.seed_sliders();
                     }
@@ -519,19 +502,14 @@ impl Desktop {
             &summary,
             !on,
             |ui| {
-                let mut changed = toggle_row(
-                    ui,
-                    &mut self.sticker_on,
-                    "Cut a sticker",
-                    Some("Outline around the shapes"),
-                )
-                .on_hover_text(
-                    "Paints a border around the outside of everything in the vector, with a \
+                let mut changed = toggle_row(ui, &mut self.sticker_on, "Cut a sticker", None)
+                    .on_hover_text(
+                        "Paints a border around the outside of everything in the vector, with a \
                  rim outside it like a die-cut sticker, and grows the picture so the \
                  outline fits. The shapes themselves do not change; the outline is \
                  saved with them.",
-                )
-                .changed();
+                    )
+                    .changed();
                 let mut cut = false;
                 let shown = self.sticker_on;
                 reveal(ui, "sticker-settings", shown, |ui| {
@@ -672,29 +650,23 @@ impl Desktop {
             false,
             |ui| {
                 ui.add_enabled_ui(idle, |ui| {
-                    toggle_row(
-                        ui,
-                        &mut self.automatic,
-                        "Auto settings",
-                        Some("Detect type & quality"),
-                    )
-                    .on_hover_text(
+                    toggle_row(ui, &mut self.automatic, "Auto settings", None).on_hover_text(
                         "Estimated locally from colors, edges and resolution. Turn off to \
                      choose the image type and source quality.",
                     );
                     ui.add_space(4.);
                     if self.automatic {
-                        let text = match self.detected {
-                            Some(d) => format!(
+                        // What Auto found, once there is a picture to look at.
+                        if let Some(d) = self.detected {
+                            let text = format!(
                                 "{} \u{00B7} {:?} quality",
                                 crate::auto::category_name(d.category),
                                 d.quality
-                            ),
-                            None => "Open an image to detect its type and quality.".into(),
-                        };
-                        inset(ui, |ui| {
-                            ui.label(RichText::new(text).size(12.5).color(pal().dim));
-                        });
+                            );
+                            inset(ui, |ui| {
+                                ui.label(RichText::new(text).size(12.5).color(pal().dim));
+                            });
+                        }
                     } else {
                         ui.label(RichText::new("Image type").size(12.).color(pal().dim));
                         egui::ComboBox::from_id_salt("category")
@@ -814,37 +786,34 @@ impl Desktop {
                             }
                         });
                     });
-                    ui.add_space(4.);
-                    toggle_row(
-                        ui,
-                        &mut self.options.optional_optimizer,
-                        "Smooth joins",
-                        Some("Experimental"),
-                    )
-                    .on_hover_text(
-                        "Curve pieces meet without a kink, for a little less accuracy \
-                     (one extra fitting step). The original program shipped with it off; \
-                     off is the original result.",
-                    );
-                    if let Some(note) = self.raw_document.as_deref().and_then(optimizer_note) {
-                        ui.label(RichText::new(note).size(11.5).color(pal().dim));
-                    }
                 });
-                // Not greyed while a conversion runs: switching it off is
-                // how to stop the next one starting by itself.
-                ui.add_space(4.);
-                toggle_row(
-                    ui,
-                    &mut self.auto_convert,
-                    "Convert automatically",
-                    Some("When a setting changes"),
-                )
-                .on_hover_text(
-                    "Once the image has been converted, changing a setting here or in the \
-                     Advanced card converts it again by itself, a moment after the last \
-                     change; a conversion still running with the old settings is stopped. \
-                     Opening an image never converts it.",
-                );
+                more_options(ui, "conversion", |ui| {
+                    ui.add_enabled_ui(idle, |ui| {
+                        toggle_row(
+                            ui,
+                            &mut self.options.optional_optimizer,
+                            "Smooth joins",
+                            None,
+                        )
+                        .on_hover_text(
+                            "Experimental. Curve pieces meet without a kink, for a little \
+                             less accuracy (one extra fitting step). The original program \
+                             shipped with it off; off is the original result.",
+                        );
+                        if let Some(note) = self.raw_document.as_deref().and_then(optimizer_note) {
+                            ui.label(RichText::new(note).size(11.5).color(pal().dim));
+                        }
+                    });
+                    // Not greyed while a conversion runs: switching it off is
+                    // how to stop the next one starting by itself.
+                    toggle_row(ui, &mut self.auto_convert, "Convert automatically", None)
+                        .on_hover_text(
+                            "Once the image has been converted, changing a setting converts \
+                             it again by itself, a moment after the last change; a \
+                             conversion still running with the old settings is stopped. \
+                             Opening an image never converts it.",
+                        );
+                });
                 if self.conversion_stale() && self.worker.is_none() {
                     ui.label(
                         RichText::new(self.stale_hint())
@@ -951,83 +920,90 @@ impl Desktop {
                         );
                     moved = slider.changed();
                 });
-                ui.add_space(4.);
-                let regular_toggled =
-                    toggle_row(ui, &mut self.regularize, "True lines and circles", None)
-                        .on_hover_text(
-                            "A run of pieces that all lie within 0.8 source pixels of one \
+                let mut regular_toggled = false;
+                let mut shapes_toggled = false;
+                let mut straight_toggled = false;
+                let mut straight_moved = false;
+                let mut straight_auto = false;
+                more_options(ui, "curves", |ui| {
+                    regular_toggled =
+                        toggle_row(ui, &mut self.regularize, "True lines and circles", None)
+                            .on_hover_text(
+                                "A run of pieces that all lie within 0.8 source pixels of one \
                      straight line is drawn as that line, and a run on one circle as \
                      circle arcs (a full ring becomes a four-piece circle), so traced \
                      edges stop wobbling. Shared edges stay sealed; nodes where three \
                      fills meet never move.",
+                            )
+                            .changed();
+                    // Photographs are left as traced: the switch would do nothing.
+                    let photo = self.effective_category() == Some(ImageCategory::Photograph);
+                    shapes_toggled = !photo
+                        && toggle_row(
+                            ui,
+                            &mut self.primitives,
+                            "True shapes from the pixels",
+                            None,
                         )
-                        .changed();
-                // Photographs are left as traced: the switch would do nothing.
-                let photo = self.effective_category() == Some(ImageCategory::Photograph);
-                let shapes_toggled = !photo
-                    && toggle_row(
-                        ui,
-                        &mut self.primitives,
-                        "True shapes from the pixels",
-                        None,
-                    )
-                    .on_hover_text(
-                        "A closed outline that the picture's own pixels show to be a \
+                        .on_hover_text(
+                            "A closed outline that the picture's own pixels show to be a \
                              circle, an ellipse, a rectangle or a rounded rectangle is drawn \
                              as that shape, when it explains those pixels at least as well as \
                              the traced outline: small dots and rounded squares come out round \
                              and square-on. Artwork only; photographs are left as traced.",
+                        )
+                        .changed();
+                    straight_toggled = toggle_row(
+                        ui,
+                        &mut self.straighten,
+                        "Straighten lines",
+                        None,
                     )
-                    .changed();
-                let straight_toggled =
-                    toggle_row(ui, &mut self.straighten, "Straighten lines", None)
-                        .on_hover_text(
-                            "A curve piece that never bows further than the tolerance from the \
+                    .on_hover_text(
+                        "A curve piece that never bows further than the tolerance from the \
                      straight line between its ends is drawn as that line, and lines within \
                      three degrees of horizontal or vertical are snapped to it (no node moves \
                      more than a pixel), so pixel edges come out straight and corners square. \
                      Right-click a node for the same by hand.",
-                        )
-                        .changed();
-                let mut straight_moved = false;
-                let mut straight_auto = false;
-                let straighten = self.straighten;
-                reveal(ui, "straighten-bow", straighten, |ui| {
-                    egui::Sides::new().show(
-                        ui,
-                        |ui| {
-                            ui.label(RichText::new("Bow").size(12.5).color(pal().dim));
-                        },
-                        |ui| {
-                            ui.spacing_mut().item_spacing.x = 8.;
-                            let shown = if self.straighten_auto {
-                                format!("Auto \u{00B7} {:.2} px", self.straighten_tolerance)
-                            } else {
-                                format!("{:.2} px", self.straighten_tolerance)
-                            };
-                            ui.label(RichText::new(shown).size(12.5).color(pal().text));
-                            if ui
-                                .add_enabled(
-                                    !self.straighten_auto,
-                                    egui::Button::new(RichText::new("Auto").size(12.))
-                                        .min_size(Vec2::new(44., 22.))
-                                        .corner_radius(CornerRadius::same(11)),
-                                )
-                                .on_hover_text(
-                                    "The bow measured best for the kind of picture: 0.2 px on \
+                    )
+                    .changed();
+                    let straighten = self.straighten;
+                    reveal(ui, "straighten-bow", straighten, |ui| {
+                        egui::Sides::new().show(
+                            ui,
+                            |ui| {
+                                ui.label(RichText::new("Bow").size(12.5).color(pal().dim));
+                            },
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 8.;
+                                let shown = if self.straighten_auto {
+                                    format!("Auto \u{00B7} {:.2} px", self.straighten_tolerance)
+                                } else {
+                                    format!("{:.2} px", self.straighten_tolerance)
+                                };
+                                ui.label(RichText::new(shown).size(12.5).color(pal().text));
+                                if ui
+                                    .add_enabled(
+                                        !self.straighten_auto,
+                                        egui::Button::new(RichText::new("Auto").size(12.))
+                                            .min_size(Vec2::new(44., 22.))
+                                            .corner_radius(CornerRadius::same(11)),
+                                    )
+                                    .on_hover_text(
+                                        "The bow measured best for the kind of picture: 0.2 px on \
                                      smooth-edged artwork, 0.65 on pixel art, 1.2 on photos.",
-                                )
-                                .on_disabled_hover_text(
-                                    "Auto is on; moving the slider turns it off",
-                                )
-                                .clicked()
-                            {
-                                straight_auto = true;
-                            }
-                        },
-                    );
-                    ui.spacing_mut().slider_width = ui.available_width();
-                    straight_moved = ui
+                                    )
+                                    .on_disabled_hover_text(
+                                        "Auto is on; moving the slider turns it off",
+                                    )
+                                    .clicked()
+                                {
+                                    straight_auto = true;
+                                }
+                            },
+                        );
+                        ui.spacing_mut().slider_width = ui.available_width();
+                        straight_moved = ui
                         .add(
                             egui::Slider::new(&mut self.straighten_tolerance, STRAIGHTEN_RANGE)
                                 .logarithmic(true)
@@ -1038,6 +1014,7 @@ impl Desktop {
                          between its ends and still be drawn as that line.",
                         )
                         .changed();
+                    });
                 });
                 ui.add_space(2.);
                 let counts = match (self.node_counts, self.simplify) {
@@ -1048,13 +1025,15 @@ impl Desktop {
                     (None, _) => String::new(),
                 };
                 let note = if counts.is_empty() {
-                    "Merges neighboring pieces; outlines stay sealed.".to_owned()
+                    String::new()
                 } else if self.derive_pending.is_some() {
                     format!("{counts} \u{00B7} updating\u{2026}")
                 } else {
                     counts
                 };
-                ui.label(RichText::new(note).size(11.5).color(pal().faint));
+                if !note.is_empty() {
+                    ui.label(RichText::new(note).size(11.5).color(pal().faint));
+                }
                 if straight_moved {
                     self.straighten_auto = false;
                 }
@@ -1106,13 +1085,8 @@ impl Desktop {
             &summary,
             !shown,
             |ui| {
-                toggle_row(
-                    ui,
-                    &mut self.nodes,
-                    "Show curve nodes",
-                    count.map(|n| format!("{n} nodes")).as_deref(),
-                )
-                .on_hover_text("Marks every anchor node on the vector.  (N)");
+                toggle_row(ui, &mut self.nodes, "Show curve nodes", None)
+                    .on_hover_text("Marks every anchor node on the vector.  (N)");
                 let shown = self.nodes;
                 reveal(ui, "node-edits", shown, |ui| {
                     let mut done = Vec::new();

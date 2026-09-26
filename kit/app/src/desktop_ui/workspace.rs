@@ -85,10 +85,8 @@ impl Desktop {
                         ui,
                         |ui| {
                             let (glyph, title) = match (vector, overlay) {
-                                (true, false) => (icon::VECTOR, "Vector result"),
-                                (false, false) => (icon::SOURCE, "Source image"),
-                                (true, true) => (icon::VECTOR, "Vector"),
-                                (false, true) => (icon::SOURCE, "Bitmap"),
+                                (true, _) => (icon::VECTOR, "Vector"),
+                                (false, _) => (icon::SOURCE, "Original"),
                             };
                             ui.label(RichText::new(glyph).size(14.).color(pal().accent));
                             ui.label(
@@ -177,31 +175,28 @@ impl Desktop {
                                 }
                             } else {
                                 match &self.raster {
-                                    Some(r) => {
-                                        let name = std::path::Path::new(&self.loaded_path)
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().into_owned())
-                                            .unwrap_or_default();
-                                        // The size lives in the footer's chip.
-                                        let _ = r;
-                                        let mut text = name;
+                                    // The name is the toolbar's title and the size
+                                    // the footer's chip: only what was done to the
+                                    // picture before tracing.
+                                    Some(_) => {
+                                        let mut text = Vec::new();
                                         if let (Some(prep), true) =
                                             (&self.converted_prep, self.working.is_some())
                                         {
                                             if let Some(n) = prep.colors {
-                                                text.push_str(&format!(" \u{00B7} {n} colors"));
+                                                text.push(format!("{n} colors"));
                                             }
                                             if prep.background.is_some() {
-                                                text.push_str(" \u{00B7} flattened");
+                                                text.push("flattened".to_owned());
                                             }
                                             if !prep.recolors.is_empty() {
-                                                text.push_str(&format!(
-                                                    " \u{00B7} {} merged",
+                                                text.push(format!(
+                                                    "{} merged",
                                                     prep.recolors.len()
                                                 ));
                                             }
                                         }
-                                        text
+                                        text.join(" \u{00B7} ")
                                     }
                                     None => String::new(),
                                 }
@@ -860,21 +855,11 @@ impl Desktop {
         let dropping = !vector && self.idle() && Self::files_hovering(ui.ctx());
         let (glyph, title, hint) = match (vector, self.raster.is_some(), dropping) {
             (false, _, true) => (icon::OPEN, "Drop to open", ""),
-            (false, _, false) => (
-                icon::OPEN,
-                "Drop an image here",
-                "PNG, JPEG, GIF, BMP, TIFF, TGA, PNM or Photoshop PSD, or the folder button above.\nSVG, PDF, AI and EPS files too: trace them, or convert them as they are.",
-            ),
-            (true, true, _) => (
-                icon::CONVERT,
-                "Ready to convert",
-                "Convert traces the image into curves.",
-            ),
-            (true, false, _) => (
-                icon::VECTOR,
-                "Vector result",
-                "The traced curves appear here, with optional anchor nodes.",
-            ),
+            // One line each: what to do, not the list of formats (the Open
+            // dialog filters by them).
+            (false, _, false) => (icon::OPEN, "Drop an image here", "or click Open above"),
+            (true, true, _) => (icon::CONVERT, "Ready to convert", ""),
+            (true, false, _) => (icon::VECTOR, "The vector appears here", ""),
         };
         if !vector {
             if dropping {

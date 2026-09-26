@@ -130,10 +130,8 @@ const RAIL_BAR_DELAY: Duration = Duration::from_millis(350);
 /// draw as a missing-glyph box. `tests::every_icon_has_a_glyph` guards the list.
 pub mod icon {
     pub const OPEN: &str = "\u{1F5C1}";
-    pub const LOAD: &str = "\u{21BB}";
     pub const CONVERT: &str = "\u{25B6}";
     pub const SAVE: &str = "\u{1F4BE}";
-    pub const CAMERA: &str = "\u{1F4F7}";
     pub const CLOSE: &str = "\u{1F5D9}";
     pub const SETTINGS: &str = "\u{2699}";
     // A trigram in egui's icon font on every system (U+2637 is in no font the
@@ -159,12 +157,10 @@ pub mod icon {
     pub const OPEN_CARD: &str = "\u{25BC}";
     pub const CLOSED_CARD: &str = "\u{25BA}";
     pub const APPEARANCE: &str = "\u{1F313}";
-    pub const ALL: [&str; 28] = [
+    pub const ALL: [&str; 26] = [
         OPEN,
-        LOAD,
         CONVERT,
         SAVE,
-        CAMERA,
         CLOSE,
         SETTINGS,
         SLIDERS,
@@ -1047,7 +1043,7 @@ mod vector_ui;
 mod widgets;
 mod workspace;
 
-use look::{faded, pal};
+use look::{faded, pal, SHADOW_REACH};
 pub use look::{Look, ThemeChoice};
 use widgets::*;
 

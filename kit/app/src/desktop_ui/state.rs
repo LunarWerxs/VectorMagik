@@ -82,7 +82,7 @@ impl Desktop {
         #[cfg(feature = "desktop")]
         crate::dragout::tidy();
         let title_family = install_fonts(ctx);
-        look::set(Look::Classic, true);
+        look::set(Look::Studio, true);
         apply_theme(ctx, title_family.clone());
         let logo = render_logo(64).map(|rgba| {
             ctx.load_texture(
@@ -155,10 +155,10 @@ impl Desktop {
             ask_licence: false,
             prompt_key: false,
             licence_opened: false,
-            look: Look::Classic,
+            look: Look::Studio,
             theme: ThemeChoice::Dark,
-            appearance_saved: (Look::Classic, ThemeChoice::Dark, None),
-            applied: Some((Look::Classic, true)),
+            appearance_saved: (Look::Studio, ThemeChoice::Dark, None),
+            applied: Some((Look::Studio, true)),
             appearance_open: false,
             appearance_anchor: egui::Rect::NOTHING,
             vector_offer: None,
@@ -177,7 +177,9 @@ impl Desktop {
             view: View::Overlay,
             overlay_vector: true,
             // The Licence card starts folded to its one line.
-            collapsed: [false, false, false, false, false, false, true],
+            // Open at first: Conversion and Curves, what most pictures
+            // need; the tools and the expert settings fold until wanted.
+            collapsed: [false, false, true, true, true, true, true],
             advanced_on: false,
             sliders: Sliders::default(),
             regularize: true,
@@ -198,7 +200,7 @@ impl Desktop {
             replaced: None,
             errand: None,
             staged: None,
-            status: "Open an image, or drop one onto the source card.".into(),
+            status: "Open or drop an image to begin.".into(),
             status_kind: StatusKind::Info,
             started: Stopwatch::start(),
             elapsed: None,
@@ -1007,10 +1009,7 @@ impl Desktop {
         self.zoom = 1.;
         self.fit = 1.;
         self.scroll = Vec2::ZERO;
-        self.set_status(
-            StatusKind::Info,
-            "Open an image, or drop one onto the source card.",
-        );
+        self.set_status(StatusKind::Info, "Open or drop an image to begin.");
     }
     /// Open the picture at `path`. A file that cannot be opened leaves the
     /// picture already open as it was, with its result, edits and Undo (the

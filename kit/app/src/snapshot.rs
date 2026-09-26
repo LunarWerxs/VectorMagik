@@ -235,7 +235,7 @@ impl Default for Options {
             pointer: None,
             drag: None,
             reconvert: false,
-            look: crate::desktop_ui::Look::Classic,
+            look: crate::desktop_ui::Look::Studio,
             light: false,
         }
     }

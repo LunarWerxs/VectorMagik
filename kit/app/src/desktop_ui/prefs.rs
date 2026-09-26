@@ -108,9 +108,9 @@ pub(super) fn parse_licence(text: &str) -> crate::licence::Stored {
 }
 
 /// The look, light or dark and the first-run answer kept in `text`; a line
-/// missing or not understood keeps Classic, dark, not yet asked.
+/// missing or not understood keeps Studio, dark, not yet asked.
 pub(super) fn parse_appearance(text: &str) -> (Look, ThemeChoice, Option<LicenceUse>) {
-    let (mut look, mut theme, mut answer) = (Look::Classic, ThemeChoice::Dark, None);
+    let (mut look, mut theme, mut answer) = (Look::Studio, ThemeChoice::Dark, None);
     for line in text.lines() {
         match line.split_once('=') {
             Some(("look", word)) => look = Look::from_word(word).unwrap_or(look),
