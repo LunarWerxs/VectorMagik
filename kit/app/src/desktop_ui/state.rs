@@ -204,6 +204,7 @@ impl Desktop {
             elapsed: None,
             zoom: 1.,
             fit: 1.,
+            fit_area: None,
             scroll: Vec2::ZERO,
             nodes: false,
             simplify: true,

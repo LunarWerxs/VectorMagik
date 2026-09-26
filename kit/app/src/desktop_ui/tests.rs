@@ -390,7 +390,7 @@ fn sticker_outlines_the_shapes_grows_the_picture_and_cuts_the_background() {
     // The card draws with the sticker on and the tile thread renders the
     // widened picture at the widened width.
     run_frame(&ctx, &mut app);
-    app.zoom = 4.;
+    app.zoom = 8.;
     let deadline = Instant::now() + Duration::from_secs(20);
     while app.tile.is_none() && Instant::now() < deadline {
         run_frame(&ctx, &mut app);
@@ -719,7 +719,7 @@ fn zoomed_vector_gets_a_crisp_tile_from_the_render_thread() {
         Some(&source),
         true,
         false,
-        4.,
+        8.,
         None,
         None,
         Preparation::default(),
@@ -1799,6 +1799,63 @@ fn hold_shows_the_other_picture_only_while_it_is_held() {
     app.hold_compare = false;
     frame_with(&ctx, &mut app, &[Key::B], &[]);
     assert!(!app.overlay_vector && app.peek.is_none());
+}
+
+/// Held by its button, the original stays as long as the button is held:
+/// a click-only button stopped counting as pressed after egui's 0.8 s click
+/// limit and the vector came back by itself (the owner, September 26, 2026).
+#[test]
+fn holding_the_original_button_keeps_the_original_until_let_go() {
+    let ctx = egui::Context::default();
+    let mut app = converted(&ctx);
+    app.set_view(View::Overlay, true);
+    app.hold_compare = true;
+    for _ in 0..30 {
+        run_frame(&ctx, &mut app);
+    }
+    let press = |app: &mut Desktop, at: egui::Pos2, pressed: bool| {
+        frame_events(
+            &ctx,
+            app,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+    };
+    // The Original button in the overlay card's heading: where a press shows
+    // the original.
+    let mut button = None;
+    'scan: for y in (96..460).step_by(12) {
+        for x in (480..1040).step_by(16) {
+            let at = egui::pos2(x as f32, y as f32);
+            press(&mut app, at, true);
+            run_frame(&ctx, &mut app);
+            let original = app.peek == Some(false);
+            press(&mut app, at, false);
+            // A press on its checkbox turns Hold off.
+            app.hold_compare = true;
+            if original {
+                button = Some(at);
+                break 'scan;
+            }
+        }
+    }
+    let at = button.expect("no Original button in the overlay card");
+    press(&mut app, at, true);
+    // A frame is 1/60 s: 90 of them hold it past the click limit.
+    for _ in 0..90 {
+        run_frame(&ctx, &mut app);
+    }
+    assert_eq!(app.peek, Some(false), "let go by itself while held");
+    press(&mut app, at, false);
+    run_frame(&ctx, &mut app);
+    assert_eq!(app.peek, None);
 }
 
 #[test]

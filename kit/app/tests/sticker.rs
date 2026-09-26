@@ -196,6 +196,10 @@ fn preview_snapshot_draws_the_sticker_card_and_the_grown_picture() {
             "--cut-background",
             "--height",
             "1400",
+            // A picture is shown at most at its own size; 2x brings the
+            // 250 px mark back to the size these pixel counts were set at.
+            "--zoom",
+            "2",
             "--output",
         ])
         .arg(&output)

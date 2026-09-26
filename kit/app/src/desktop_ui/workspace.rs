@@ -19,47 +19,129 @@ impl Desktop {
                 // Before a picture: one compact welcome card, not two cards
                 // the height of the window (the owner, September 26, 2026:
                 // "the large drop box ... might be too big").
+                let area = ui.available_rect_before_wrap();
+                let ctx = ui.ctx().clone();
                 if self.raster.is_none() {
-                    match self.welcome(ui) {
+                    let start = self.welcome(ui, area);
+                    // A picture opened next grows both cards out of this one.
+                    let here = glide_now(&ctx, "welcome", area);
+                    for key in ["card-original", "card-vector"] {
+                        seed(&ctx, key, here);
+                    }
+                    match start {
                         Start::Browse => self.open_dialog(),
-                        Start::Sample => self.open_sample(ui.ctx()),
+                        Start::Sample => self.open_sample(&ctx),
                         Start::Nothing => {}
                     }
                     return;
                 }
-                let avail = ui.available_size();
-                let aspect = self
-                    .raster
-                    .as_ref()
-                    .map(|r| r.width as f32 / r.height.max(1) as f32)
-                    .unwrap_or(1.);
-                let gap = 12.;
-                if self.view == View::Overlay {
-                    let vector =
-                        self.peek.unwrap_or(self.overlay_vector) && self.vector_texture().is_some();
-                    if !vector {
-                        self.node_drag = None;
+                // The cards hug the picture at its shown size and glide there
+                // (the owner: the drop zone "should animate ... to be the size
+                // of the thing you dropped in there", and a small picture was
+                // blown up to fill the window).
+                let overlay = self.view == View::Overlay;
+                let original_shown = overlay
+                    && !(self.peek.unwrap_or(self.overlay_vector)
+                        && self.vector_texture().is_some());
+                if overlay && original_shown {
+                    self.node_drag = None;
+                }
+                let targets = self.card_rects(area);
+                let mut original = None;
+                for (vector, target) in targets {
+                    let key = if vector {
+                        "card-vector"
+                    } else {
+                        "card-original"
+                    };
+                    let rect = glide(&ctx, key, target);
+                    if !vector || overlay {
+                        original.get_or_insert(rect);
                     }
-                    self.card(ui, vector);
-                } else if stacked_layout(avail, aspect) {
-                    let height = ((avail.y - gap) / 2.).max(80.);
-                    ui.allocate_ui(Vec2::new(avail.x, height), |ui| {
-                        ui.set_min_size(Vec2::new(avail.x, height));
-                        self.card(ui, false);
-                    });
-                    ui.add_space(gap);
-                    ui.allocate_ui(Vec2::new(avail.x, height), |ui| {
-                        ui.set_min_size(Vec2::new(avail.x, height));
-                        self.card(ui, true);
-                    });
-                } else {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    ui.columns(2, |columns| {
-                        self.card(&mut columns[0], false);
-                        self.card(&mut columns[1], true);
+                    let shows_vector = if overlay { !original_shown } else { vector };
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                        self.card(ui, shows_vector);
                     });
                 }
+                // Closing the picture collapses the welcome card out of the
+                // original's card.
+                if let Some(original) = original {
+                    seed(&ctx, "welcome", original);
+                    // Leaving Overlay splits both cards out of its one card,
+                    // not the vector's from wherever it last was.
+                    if overlay {
+                        seed(&ctx, "card-vector", original);
+                    }
+                }
             });
+    }
+
+    /// Where the picture cards go: each the picture at its shown size (fit
+    /// to the space, never enlarged past its own pixels, times the zoom) plus
+    /// the card's heading and margin, no larger than the space, the pair side
+    /// by side or one above the other, centred a little above the middle.
+    /// Records the full-size body the fit is measured against. The flag says
+    /// which card: false the original (or the one overlay card), true the
+    /// vector.
+    fn card_rects(&mut self, area: egui::Rect) -> Vec<(bool, egui::Rect)> {
+        const GAP: f32 = 12.;
+        let Some(raster) = self.raster.as_ref() else {
+            return Vec::new();
+        };
+        let margin = self.picture_margin();
+        let picture = Vec2::new(
+            raster.width as f32 + 2. * margin,
+            raster.height as f32 + 2. * margin,
+        );
+        let overlay = self.view == View::Overlay;
+        let stacked = !overlay && stacked_layout(area.size(), picture.x / picture.y.max(1.));
+        let slot = if overlay {
+            area.size()
+        } else if stacked {
+            Vec2::new(area.width(), ((area.height() - GAP) / 2.).max(80.))
+        } else {
+            Vec2::new(((area.width() - GAP) / 2.).max(80.), area.height())
+        };
+        let body = slot - Vec2::new(0., CARD_HEADING);
+        self.fit_area = Some(body);
+        let shown = picture * picture_fit(body, picture) * self.zoom;
+        let traced_chip = self.working_source.is_some()
+            && self
+                .converted_prep
+                .as_ref()
+                .is_some_and(|p| !p.is_identity());
+        let least = Vec2::new(
+            match (overlay, traced_chip) {
+                (true, true) => 440.,
+                (true, false) => 340.,
+                (false, _) => 240.,
+            },
+            210.,
+        );
+        let card = (shown + Vec2::new(24., 24. + CARD_HEADING))
+            .max(least)
+            .min(slot);
+        let group = if overlay {
+            card
+        } else if stacked {
+            Vec2::new(card.x, 2. * card.y + GAP)
+        } else {
+            Vec2::new(2. * card.x + GAP, card.y)
+        };
+        let min = egui::pos2(
+            area.center().x - group.x / 2.,
+            area.center().y - group.y / 2. - (area.height() - group.y).max(0.) * 0.12,
+        );
+        let first = egui::Rect::from_min_size(min, card);
+        if overlay {
+            return vec![(false, first)];
+        }
+        let step = if stacked {
+            Vec2::new(0., card.y + GAP)
+        } else {
+            Vec2::new(card.x + GAP, 0.)
+        };
+        vec![(false, first), (true, first.translate(step))]
     }
 
     pub(super) fn card(&mut self, ui: &mut egui::Ui, vector: bool) {
@@ -96,16 +178,41 @@ impl Desktop {
                                 (false, _) => (icon::SOURCE, "Original"),
                             };
                             ui.label(RichText::new(glyph).size(14.).color(pal().accent));
-                            ui.label(
+                            let named = ui.label(
                                 RichText::new(title)
                                     .size(14.)
                                     .family(family.clone())
                                     .color(pal().text),
                             );
                             if overlay {
-                                ui.add_space(6.);
+                                // The title's slot is as wide as its longer
+                                // name, so the buttons after it stay put when
+                                // the picture switches: "Original" is wider
+                                // than "Vector", and pressing B moved it out
+                                // from under the pointer.
+                                let widest = ui
+                                    .painter()
+                                    .layout_no_wrap(
+                                        "Original".to_owned(),
+                                        FontId::new(14., family.clone()),
+                                        pal().text,
+                                    )
+                                    .size()
+                                    .x;
+                                ui.add_space((widest - named.rect.width()).max(0.) + 6.);
                                 let hold = self.hold_compare;
-                                let bitmap = choice_width(ui, "B  Original", !vector, 84.)
+                                let hold_sense = if hold {
+                                    egui::Sense::click_and_drag()
+                                } else {
+                                    egui::Sense::click()
+                                };
+                                let bitmap = ui
+                                    .add(
+                                        choice_widget("B  Original", !vector)
+                                            .sense(hold_sense)
+                                            .min_size(Vec2::new(84., 24.))
+                                            .corner_radius(CornerRadius::same(12)),
+                                    )
                                     .on_hover_text(if hold {
                                         "Hold to see the original  (hold B)"
                                     } else {
@@ -127,7 +234,8 @@ impl Desktop {
                                             if vector { pal().accent } else { pal().border },
                                         ))
                                         .corner_radius(CornerRadius::same(11))
-                                        .min_size(Vec2::new(74., 22.)),
+                                        .min_size(Vec2::new(74., 22.))
+                                        .sense(hold_sense),
                                     )
                                     .on_hover_text(if hold {
                                         "Hold to see the vector  (hold V)"
@@ -265,16 +373,27 @@ impl Desktop {
                 .collect(),
             None => Vec::new(),
         };
-        let viewport = ui.available_size();
-        let fit = ((viewport.x - 24.) / w)
-            .min((viewport.y - 24.) / h)
-            .max(0.01);
+        // Measured against the card's full-size body, so a card hugging a
+        // small picture keeps its fit, and never past the picture's own
+        // pixels: a small picture is shown small, not blown up.
+        let viewport = self.fit_area.unwrap_or_else(|| ui.available_size());
+        let fit = picture_fit(viewport, Vec2::new(w, h));
         if (!vector || self.view == View::Overlay) && (self.fit - fit).abs() > 1e-6 {
             // The footer read the previous fit this frame; redraw at once.
             self.fit = fit;
             ui.ctx().request_repaint();
         }
-        let scale = fit * self.zoom;
+        let mut scale = fit * self.zoom;
+        // A picture meant to fit its card (not zoomed past the space) fits
+        // the card as drawn: while the card glides it grows and shrinks with
+        // it, and a heading a pixel taller than the layout allowed no longer
+        // leaves the picture a pixel over, with scroll bars that never went
+        // away (the owner, September 26, 2026).
+        let fits = w * scale + 24. <= viewport.x + 0.5 && h * scale + 24. <= viewport.y + 0.5;
+        if fits {
+            let room = ui.available_size();
+            scale = scale.min(((room.x - 24.) / w).min((room.y - 24.) / h).max(0.01));
+        }
         let size = if vector {
             Vec2::new(w * scale, h * scale)
         } else {
@@ -344,6 +463,13 @@ impl Desktop {
                 "source-scroll"
             })
             .auto_shrink([false, false])
+            // A picture that fits has nothing to scroll: no bars, not even a
+            // hair of one under the pointer.
+            .scroll_bar_visibility(if fits {
+                egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+            } else {
+                egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+            })
             .scroll_source(egui::containers::scroll_area::ScrollSource {
                 drag: false,
                 scroll_bar: true,
@@ -930,13 +1056,13 @@ impl Desktop {
     /// The welcome card before any picture: compact and a little above the
     /// middle, the whole card a drop target, with Browse and Try a sample;
     /// while a picture opens it says so instead. What was asked for.
-    pub(super) fn welcome(&self, ui: &mut egui::Ui) -> Start {
-        let area = ui.available_rect_before_wrap();
+    pub(super) fn welcome(&self, ui: &mut egui::Ui, area: egui::Rect) -> Start {
         let size = Vec2::new(area.width().min(540.), area.height().min(330.));
-        let rect = egui::Rect::from_center_size(
+        let target = egui::Rect::from_center_size(
             area.center() - Vec2::new(0., (area.height() - size.y) * 0.12),
             size,
         );
+        let rect = glide(ui.ctx(), "welcome", target);
         let mut start = Start::Nothing;
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             card_frame().show(ui, |ui| {
@@ -1075,6 +1201,92 @@ impl Desktop {
             Start::Nothing
         }
     }
+}
+
+/// The height of a picture card's heading row, above its picture.
+const CARD_HEADING: f32 = 42.;
+
+/// How long a card takes to glide to a new place or size, in seconds.
+const GLIDE: f64 = 0.26;
+
+/// The scale that fits `picture` in `body` with a 12 px margin all round,
+/// never above 1: a picture is shown at most at its own size.
+fn picture_fit(body: Vec2, picture: Vec2) -> f32 {
+    ((body.x - 24.) / picture.x)
+        .min((body.y - 24.) / picture.y)
+        .clamp(0.01, 1.)
+}
+
+/// Where a gliding rectangle is going, where it started and when.
+#[derive(Clone, Copy)]
+struct Glide {
+    from: egui::Rect,
+    to: egui::Rect,
+    start: f64,
+}
+
+impl Glide {
+    fn at(&self, now: f64) -> (egui::Rect, bool) {
+        let t = ((now - self.start) / GLIDE).clamp(0., 1.) as f32;
+        let eased = 1. - (1. - t).powi(3);
+        let lerp = |a: egui::Pos2, b: egui::Pos2| a + (b - a) * eased;
+        (
+            egui::Rect::from_min_max(
+                lerp(self.from.min, self.to.min),
+                lerp(self.from.max, self.to.max),
+            ),
+            t < 1.,
+        )
+    }
+}
+
+/// `target` for the rectangle named `key`, reached by easing out from
+/// wherever it was over GLIDE seconds (at once the first time it is asked
+/// for). While it moves the next frame is asked for.
+fn glide(ctx: &egui::Context, key: &str, target: egui::Rect) -> egui::Rect {
+    let id = egui::Id::new(("glide", key));
+    let now = ctx.input(|i| i.time);
+    let mut glide = ctx.data(|d| d.get_temp::<Glide>(id)).unwrap_or(Glide {
+        from: target,
+        to: target,
+        start: now - GLIDE,
+    });
+    if glide.to != target {
+        glide = Glide {
+            from: glide.at(now).0,
+            to: target,
+            start: now,
+        };
+    }
+    ctx.data_mut(|d| d.insert_temp(id, glide));
+    let (rect, moving) = glide.at(now);
+    if moving {
+        ctx.request_repaint();
+    }
+    rect
+}
+
+/// Where the rectangle named `key` is this frame (`fallback` if it has none).
+fn glide_now(ctx: &egui::Context, key: &str, fallback: egui::Rect) -> egui::Rect {
+    let now = ctx.input(|i| i.time);
+    ctx.data(|d| d.get_temp::<Glide>(egui::Id::new(("glide", key))))
+        .map_or(fallback, |g| g.at(now).0)
+}
+
+/// Put the rectangle named `key` at `rect` without a glide, so the next
+/// glide starts there.
+fn seed(ctx: &egui::Context, key: &str, rect: egui::Rect) {
+    let now = ctx.input(|i| i.time);
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::new(("glide", key)),
+            Glide {
+                from: rect,
+                to: rect,
+                start: now - GLIDE,
+            },
+        )
+    });
 }
 
 /// What the welcome card's buttons asked for.

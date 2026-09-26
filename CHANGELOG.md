@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.5.3 (September 26, 2026)
+
+- A picture is shown at most at its own size: a small one is no longer blown up to fill
+  the window.
+- The picture cards are sized to the picture, grow out of the welcome card when it opens
+  and fold back into it when it closes.
+- In the browser, the drop zone lights up while a file is dragged over it (it lit for one
+  frame).
+- The browser version's loading screen and menu in the app's own colours, not the site's
+  teal.
+- No scroll bars around a picture that fits its card (a hair of one showed under the
+  pointer).
+- Hold: the original stays for as long as its button is held (it let go after a moment),
+  and the Original and Vector buttons no longer shift when pressed.
+- In the browser, a file dropped outside the drop zone does nothing instead of replacing
+  the app, and the Save panel's file card shows a pointing hand, not a grab.
+
 ## 0.5.1 (September 26, 2026)
 
 - Before a picture: one compact welcome card (drop, click, Browse for an image or Try a

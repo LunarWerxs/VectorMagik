@@ -624,7 +624,15 @@ impl Desktop {
                 response.clone().on_hover_text(error);
             }
             if ready {
-                grab_cursor(ui, &response);
+                // A tab cannot drag a file out: its card is clicked, and says
+                // so with the pointing hand, not the grab.
+                if platform::IN_BROWSER {
+                    if response.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                } else {
+                    grab_cursor(ui, &response);
+                }
             }
             if response.drag_started() || (platform::IN_BROWSER && response.clicked()) {
                 drag = true;

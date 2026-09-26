@@ -976,6 +976,10 @@ pub struct Desktop {
     elapsed: Option<f64>,
     zoom: f32,
     fit: f32,
+    /// The body a picture card would have at its full size this frame: what
+    /// the fit is measured against, so a card that hugs a small picture does
+    /// not shrink its own fit.
+    fit_area: Option<Vec2>,
     scroll: Vec2,
     nodes: bool,
     simplify: bool,

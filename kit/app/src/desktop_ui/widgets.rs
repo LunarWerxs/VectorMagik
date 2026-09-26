@@ -665,7 +665,16 @@ pub(super) fn choice_width(
     selected: bool,
     width: f32,
 ) -> egui::Response {
-    let button = if selected {
+    ui.add(
+        choice_widget(text, selected)
+            .min_size(Vec2::new(width, 24.))
+            .corner_radius(CornerRadius::same(12)),
+    )
+}
+
+/// The button of one option of a segmented choice, before its size.
+pub(super) fn choice_widget(text: &str, selected: bool) -> egui::Button<'static> {
+    if selected {
         egui::Button::new(
             RichText::new(text)
                 .size(12.5)
@@ -676,12 +685,7 @@ pub(super) fn choice_width(
         .stroke(Stroke::new(1_f32, pal().accent))
     } else {
         egui::Button::new(RichText::new(text).size(12.5).color(pal().text))
-    };
-    ui.add(
-        button
-            .min_size(Vec2::new(width, 24.))
-            .corner_radius(CornerRadius::same(12)),
-    )
+    }
 }
 
 /// A square footer button for one character.

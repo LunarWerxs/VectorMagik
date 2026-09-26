@@ -242,6 +242,7 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   // --- the frame: input out, output in -------------------------------------
   function runFrame(now) {
     const encoded = queue.splice(0).map((fn) => fn());
+    if (hoverFiles) encoded.push(evHover(1)());
     pressQueued = false;
     let size = 8 + 4 + 4 + 4 + 4 + 1 + 1 + 4; // time, size, ppp, max side, flags, count
     for (const ev of encoded) size += ev.length;
@@ -431,9 +432,11 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   }
 
   async function readFile(file) {
-    const data = new Uint8Array(await file.arrayBuffer());
-    const name = file.name;
-    push(evFile(name, data));
+    // A folder, or a file gone since the drag, reads as nothing, and the app
+    // says it could not open it rather than doing nothing.
+    let data;
+    try { data = new Uint8Array(await file.arrayBuffer()); } catch { data = new Uint8Array(0); }
+    push(evFile(file.name, data));
   }
 
   // --- sizing --------------------------------------------------------------
@@ -565,22 +568,36 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   });
 
   const dropZone = canvas.parentElement || document.body;
+  // Only files: a dragged link or text is refused by the browser, and lights nothing.
+  const carriesFiles = (event) =>
+    !!event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files');
   on(dropZone, 'dragover', (event) => {
+    if (!carriesFiles(event)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    if (!hoverFiles) { hoverFiles = true; push(evHover(1)); }
+    if (!hoverFiles) { hoverFiles = true; wake(); }
   });
-  on(dropZone, 'dragleave', () => {
-    if (!hoverFiles) return;
+  on(dropZone, 'dragleave', (event) => {
+    // Moving onto the canvas inside the zone is not leaving it.
+    if (!hoverFiles || (event.relatedTarget && dropZone.contains(event.relatedTarget))) return;
     hoverFiles = false;
-    push(evHover(0));
+    wake();
   });
   on(dropZone, 'drop', (event) => {
     event.preventDefault();
-    if (hoverFiles) { hoverFiles = false; push(evHover(0)); }
+    if (hoverFiles) { hoverFiles = false; wake(); }
     const file = event.dataTransfer && event.dataTransfer.files[0];
     if (file) readFile(file);
   });
+  // Anywhere else on the page a dropped file does nothing: the browser's own
+  // default opens it in place of the app, losing the picture.
+  for (const type of ['dragover', 'drop']) {
+    on(window, type, (event) => {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      if (type === 'dragover' && event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+    });
+  }
 
   on(window, 'focus', wake);
   on(window, 'blur', wake);
