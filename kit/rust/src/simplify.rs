@@ -380,6 +380,13 @@ impl Piece {
     fn end_direction(&self) -> Point {
         backwards(&self.edge).unwrap_or(Point { x: -1., y: 0. })
     }
+    /// The same piece walked the other way.
+    fn reversed(&self) -> Self {
+        Self {
+            edge: self.edge.reversed(),
+            samples: self.samples.iter().rev().copied().collect(),
+        }
+    }
 }
 
 fn derivative(cubic: &Cubic, t: f64) -> Point {
@@ -732,13 +739,175 @@ fn try_merge(a: &Piece, b: &Piece) -> (f64, Cubic) {
     }
 }
 
-/// Greedy merging within one run: always take the cheapest acceptable pair
-/// next, and never merge across the run's ends.
+/// The largest distance from `samples` to the segment from `a` to `b`.
+fn off_segment(samples: &[Point], a: Point, b: Point) -> f64 {
+    let along = sub(b, a);
+    let span = dot(along, along);
+    samples
+        .iter()
+        .map(|&p| {
+            let t = if span > 0. {
+                (dot(sub(p, a), along) / span).clamp(0., 1.)
+            } else {
+                0.
+            };
+            distance(p, add(a, scale(along, t)))
+        })
+        .fold(0., f64::max)
+}
+
+/// A piece no further than this share of the tolerance from its chord is
+/// straight: the kind `dissolve` lengthens, and how straight what it takes
+/// on must be. Taking on anything within the whole tolerance flattened the
+/// start of a letter's bowl into its stem (quality round corner-dissolve:
+/// total +0.0027, less faithful, shape-text-large's edge 0.058 -> 0.064 px
+/// from the truth); at a quarter every sample of that round is as it was but
+/// one photograph, 26 bytes longer with no number worse.
+const STRAIGHT_SHARE: f64 = 0.25;
+
+/// `middle`, between the straight piece `line` and the curve `curve`,
+/// dissolved into both: the straight piece runs on to one of `middle`'s
+/// samples, as straight as it was over all it now replaces, and one cubic
+/// leaves there along it to `curve`'s far end, within `tolerance` of the
+/// rest. The fitter often cuts a straight edge short of where its curve
+/// begins, or runs it past, and joins them with a short piece holding a
+/// little of each; no merge removes it, since one cubic through it and the
+/// curve would have to follow that stretch of the edge too (the owner's
+/// GitHub mark on its rounded square, September 25, 2026: one corner kept
+/// three nodes where the other three had two, on a square too big for
+/// `primitives` to redraw). Of the samples that work, the one leaving both
+/// pieces closest to the curve they replace; `None` when none does, or where
+/// either node is a corner.
+fn dissolve(line: &Piece, middle: &Piece, curve: &Piece, tolerance: f64) -> Option<(Piece, Piece)> {
+    let (start, end) = (line.edge.start(), line.edge.end());
+    if off_segment(&line.samples, start, end) > tolerance * STRAIGHT_SHARE {
+        return None;
+    }
+    let smooth = |a: &Piece, b: &Piece| match (arriving(&a.edge), leaving(&b.edge)) {
+        (Some(t), Some(u)) => dot(t, u) > CORNER_TURN.to_radians().cos(),
+        _ => false,
+    };
+    if !smooth(line, middle) || !smooth(middle, curve) {
+        return None;
+    }
+    let mut best: Option<(f64, usize, Cubic)> = None;
+    for k in 1..middle.samples.len() - 1 {
+        let at = middle.samples[k];
+        let straight = off_segment(&line.samples, start, at).max(off_segment(
+            &middle.samples[1..=k],
+            start,
+            at,
+        ));
+        if straight > tolerance * STRAIGHT_SHARE {
+            continue;
+        }
+        let Some(along) = normalized(sub(at, start)) else {
+            continue;
+        };
+        let mut rest = middle.samples[k..].to_vec();
+        rest.extend_from_slice(&curve.samples[1..]);
+        let Some((cubic, error)) = fit_samples(&rest, along, curve.end_direction()) else {
+            continue;
+        };
+        let error = error.max(straight);
+        if error > tolerance
+            || best.as_ref().is_some_and(|(e, _, _)| *e <= error)
+            || adds_turn_back(&middle.edge.cubic, &curve.edge.cubic, &cubic)
+            || (error > ON_CIRCLE_SLACK && leaves_its_circle(&rest, &cubic))
+        {
+            continue;
+        }
+        best = Some((error, k, cubic));
+    }
+    let (_, k, cubic) = best?;
+    let at = middle.samples[k];
+    let edge = if line.edge.line {
+        Edge::line(start, at, false)
+    } else {
+        Edge {
+            cubic: Cubic {
+                points: [
+                    start,
+                    lerp(start, at, 1. / 3.),
+                    lerp(start, at, 2. / 3.),
+                    at,
+                ],
+            },
+            line: false,
+            implicit: false,
+        }
+    };
+    let mut samples = line.samples.clone();
+    samples.extend_from_slice(&middle.samples[1..=k]);
+    let mut rest = middle.samples[k..].to_vec();
+    rest.extend_from_slice(&curve.samples[1..]);
+    Some((
+        Piece { edge, samples },
+        Piece {
+            edge: Edge {
+                cubic,
+                line: false,
+                implicit: false,
+            },
+            samples: rest,
+        },
+    ))
+}
+
+/// Dissolve every piece `dissolve` can, a straight piece before or after it;
+/// whether any went.
+fn dissolve_all(pieces: &mut Vec<Piece>, cyclic: bool, tolerance: f64, minimum: usize) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while pieces.len() > minimum.max(2) && i < pieces.len() {
+        let n = pieces.len();
+        let (before, after) = if cyclic {
+            ((i + n - 1) % n, (i + 1) % n)
+        } else if i == 0 || i + 1 == n {
+            i += 1;
+            continue;
+        } else {
+            (i - 1, i + 1)
+        };
+        let (a, b, c) = (&pieces[before], &pieces[i], &pieces[after]);
+        let replaced = dissolve(a, b, c, tolerance).or_else(|| {
+            dissolve(&c.reversed(), &b.reversed(), &a.reversed(), tolerance)
+                .map(|(line, curve)| (curve.reversed(), line.reversed()))
+        });
+        let Some((first, second)) = replaced else {
+            i += 1;
+            continue;
+        };
+        pieces[before] = first;
+        pieces[after] = second;
+        // The piece after now sits at `i`, and is tried in the middle next.
+        pieces.remove(i);
+        changed = true;
+    }
+    changed
+}
+
+/// Merging within one run, then dissolving, until neither changes it.
 fn simplify_run(run: &[Edge], cyclic: bool, options: SimplifyOptions) -> Vec<Edge> {
     let tolerance = options.tolerance;
     let mut pieces: Vec<Piece> = run.iter().map(|e| Piece::new(*e)).collect();
-    let mut candidates: Vec<Option<(f64, Cubic)>> = vec![None; pieces.len()];
     let minimum = if cyclic { MIN_CLOSED_SEGMENTS } else { 1 };
+    loop {
+        merge_greedily(&mut pieces, cyclic, tolerance, minimum);
+        if !dissolve_all(&mut pieces, cyclic, tolerance, minimum) {
+            break;
+        }
+    }
+    if options.smooth_kinks {
+        smooth_kinks(&mut pieces, cyclic, tolerance);
+    }
+    pieces.into_iter().map(|p| p.edge).collect()
+}
+
+/// Greedy merging within one run: always take the cheapest acceptable pair
+/// next, and never merge across the run's ends.
+fn merge_greedily(pieces: &mut Vec<Piece>, cyclic: bool, tolerance: f64, minimum: usize) {
+    let mut candidates: Vec<Option<(f64, Cubic)>> = vec![None; pieces.len()];
     loop {
         let n = pieces.len();
         if n <= minimum {
@@ -778,10 +947,6 @@ fn simplify_run(run: &[Edge], cyclic: bool, options: SimplifyOptions) -> Vec<Edg
         candidates[merged] = None;
         candidates[(merged + n - 1) % n] = None;
     }
-    if options.smooth_kinks {
-        smooth_kinks(&mut pieces, cyclic, tolerance);
-    }
-    pieces.into_iter().map(|p| p.edge).collect()
 }
 
 /// A turn smaller than this at a node is already smooth.

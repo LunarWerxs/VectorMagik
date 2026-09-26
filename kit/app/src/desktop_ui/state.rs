@@ -412,14 +412,13 @@ impl Desktop {
         self.rounded.push(Rounded { at: nearest, reach });
         self.rederive_now(ctx)
     }
-    /// Delete the shown node nearest `at` (keeping the shape when asked) and
-    /// re-derive the shown document on this thread, for a snapshot.
+    /// Delete the shown node nearest `at` and re-derive the shown document
+    /// on this thread, for a snapshot.
     #[cfg(feature = "desktop")]
     pub(crate) fn delete_nearest_now(
         &mut self,
         ctx: &egui::Context,
         at: Point,
-        keep_shape: bool,
     ) -> Result<(), String> {
         let nodes = self
             .document
@@ -441,10 +440,7 @@ impl Desktop {
                 nearest.x, nearest.y
             ));
         }
-        self.deleted_nodes.push(NodeDeletion {
-            at: nearest,
-            keep_shape,
-        });
+        self.deleted_nodes.push(nearest);
         self.rederive_now(ctx)
     }
     /// The shown document's nodes, parsed once per document version (on the

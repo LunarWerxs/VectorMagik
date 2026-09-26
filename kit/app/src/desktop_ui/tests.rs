@@ -1949,7 +1949,7 @@ fn cancel_holds_the_settings_until_they_change() {
 }
 
 #[test]
-fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
+fn a_node_is_deleted_undone_and_kept_through_a_conversion() {
     let ctx = egui::Context::default();
     let mut app = converted(&ctx);
     run_frame(&ctx, &mut app);
@@ -1972,23 +1972,14 @@ fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
     // From its menu: the node goes and the menu closes, one step of Undo.
     app.node_menu = Some((node, egui::pos2(300., 300.)));
     assert_eq!(app.deletion_refusal(&node), None);
-    app.delete_node(node, false);
+    app.delete_node(node);
     assert!(app.node_menu.is_none());
     settle(&ctx, &mut app);
     assert!(!shows(&app, &node));
-    let plain = svg(&app);
-    assert_ne!(plain, start);
-    shortcut(&ctx, &mut app, Key::Z, Modifiers::COMMAND);
-    assert!(app.deleted_nodes.is_empty());
-    assert_eq!(svg(&app), start);
-    // Keeping the shape refits the piece in its place (or keeps the plain
-    // join, when that stays closer to the curve).
-    app.delete_node(node, true);
-    settle(&ctx, &mut app);
     let kept = svg(&app);
-    assert!(!shows(&app, &node));
     assert_ne!(kept, start);
     shortcut(&ctx, &mut app, Key::Z, Modifiers::COMMAND);
+    assert!(app.deleted_nodes.is_empty());
     assert_eq!(svg(&app), start);
     shortcut(&ctx, &mut app, Key::Y, Modifiers::COMMAND);
     assert_eq!(svg(&app), kept);
@@ -2000,7 +1991,7 @@ fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
     // A junction stays, and says why.
     if let Some(junction) = nodes.iter().find(|n| refusal(n).is_some()) {
         let before = app.deleted_nodes.clone();
-        app.delete_node(*junction, false);
+        app.delete_node(*junction);
         assert_eq!(app.deleted_nodes, before);
         assert_eq!(Some(app.status.as_str()), refusal(junction));
     }
@@ -2038,7 +2029,7 @@ fn a_node_is_deleted_two_ways_undone_and_kept_through_a_conversion() {
     assert!(app
         .deletion_refusal(&arc_end)
         .is_some_and(|why| why.contains("rounded corner")));
-    app.delete_node(other, false);
+    app.delete_node(other);
     settle(&ctx, &mut app);
     assert!(app.rounding_of(&other).is_none(), "{}", app.status);
     assert_eq!(app.deleted_nodes.len(), 2);

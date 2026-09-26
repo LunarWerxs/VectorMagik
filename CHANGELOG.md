@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.4.3 (September 25, 2026)
+
+- Every rounded corner gets two nodes. On a large rounded square one corner could come
+  out with three, because the tracer stopped the straight edge a little before the
+  corner's curve began and joined them with a short extra piece; that piece now goes into
+  the edge and the curve beside it, so the corner is one curve. Every other sample of the
+  quality check draws exactly as before.
+- Delete node keeps the shape: the two curves meeting at the node become one curve fitted
+  to the outline they drew. The plain delete that kept the old handles, which bent a
+  rounded corner, is gone, and with it the second menu entry its tooltip used to hide.
+
 ## 0.4.2 (September 25, 2026)
 
 - VectorMagik runs on Mac and Linux. A universal Mac app for Apple Silicon and Intel

@@ -380,17 +380,14 @@ impl Document {
         })
     }
     /// The same document with the listed nodes deleted by hand, their two
-    /// pieces joined into one in every outline through them
+    /// pieces refitted as one in every outline through them
     /// (`vector_rebuild::nodes::delete_nodes`); a node no longer in the
     /// document, or no longer deletable, is skipped.
-    pub fn without_nodes(
-        &self,
-        deletions: &[vector_rebuild::nodes::NodeDeletion],
-    ) -> Result<Self, String> {
-        if deletions.is_empty() {
+    pub fn without_nodes(&self, nodes: &[vector_rebuild::geometry::Point]) -> Result<Self, String> {
+        if nodes.is_empty() {
             return Ok(self.clone());
         }
-        let (svg, _) = vector_rebuild::nodes::delete_nodes(&self.svg, deletions)?;
+        let (svg, _) = vector_rebuild::nodes::delete_nodes(&self.svg, nodes)?;
         Ok(Self {
             svg,
             ..self.clone()

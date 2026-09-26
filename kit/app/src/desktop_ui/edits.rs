@@ -299,7 +299,7 @@ impl Desktop {
             .count()
     }
     fn is_deleted(&self, node: &Point) -> bool {
-        self.deleted_nodes.iter().any(|d| same_point(&d.at, node))
+        self.deleted_nodes.iter().any(|d| same_point(d, node))
     }
     /// Why the node shown at `node` cannot be deleted, or `None`: worked out
     /// on the document the deletions apply to (before the rounding, which
@@ -338,11 +338,10 @@ impl Desktop {
         refusal
     }
     /// Delete the node shown at `node` from the drawing: its two pieces
-    /// become one, keeping their outer handles, or with `keep_shape` one
-    /// cubic fitted to the curve they drew. A rounded corner's rounding goes
-    /// with it. Refused, with the reason in the status line, at a junction,
-    /// at an open outline's end and on an outline of three nodes.
-    pub(super) fn delete_node(&mut self, node: Point, keep_shape: bool) {
+    /// become one cubic fitted to the curve they drew. A rounded corner's
+    /// rounding goes with it. Refused, with the reason in the status line, at
+    /// a junction, at an open outline's end and on an outline of three nodes.
+    pub(super) fn delete_node(&mut self, node: Point) {
         if let Some(reason) = self.deletion_refusal(&node) {
             self.set_status(StatusKind::Info, reason);
             return;
@@ -351,19 +350,12 @@ impl Desktop {
             return;
         }
         self.rounded.retain(|r| !same_point(&r.at, &node));
-        self.deleted_nodes.push(NodeDeletion {
-            at: node,
-            keep_shape,
-        });
+        self.deleted_nodes.push(node);
         self.node_menu = None;
         self.reapply();
         self.set_status(
             StatusKind::Info,
-            if keep_shape {
-                "Node deleted, its curve refitted. Ctrl+Z brings it back."
-            } else {
-                "Node deleted. Ctrl+Z brings it back."
-            },
+            "Node deleted, its curve refitted. Ctrl+Z brings it back.",
         );
     }
     /// Bring every deleted node back.

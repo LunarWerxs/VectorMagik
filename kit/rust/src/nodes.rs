@@ -115,19 +115,6 @@ pub fn move_nodes(svg: &str, moves: &[NodeMove]) -> Result<(String, usize), Stri
     Ok((splice(svg, &ranges, &paths), hit.len()))
 }
 
-/// One node deleted by hand. The two pieces meeting there become one piece
-/// from the node before to the node after: with `keep_shape`, one cubic
-/// fitted to the curve the two drew, leaving and arriving along their outer
-/// tangents (Simplify's merge, `simplify::fit_samples`), so the outline stays
-/// where one cubic can follow it; without, the cubic that keeps the two
-/// pieces' outer handles, as if the node had never been there (two lines
-/// become one line).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NodeDeletion {
-    pub at: Point,
-    pub keep_shape: bool,
-}
-
 /// Why a node cannot be deleted.
 pub const ABSENT: &str = "This node is not in the drawing.";
 const JUNCTION: &str = "Three or more boundaries meet at this node, so it stays.";
@@ -247,28 +234,28 @@ fn refitted(arriving: &Edge, leaving_edge: &Edge) -> Edge {
     }
 }
 
-/// Delete the listed nodes, one after another. A node that is not in the
-/// document, or that `deletion_refusal` refuses there, is skipped (a later
-/// trace may no longer have it, or have it as a junction), and a node listed
-/// twice takes its first listing. The new piece is worked out once, from the
-/// first outline through the node, and every outline through it gets that
-/// piece or its reverse, so both fills of a shared edge stay sealed. Returns
-/// the rewritten SVG and how many nodes went.
-pub fn delete_nodes(svg: &str, deletions: &[NodeDeletion]) -> Result<(String, usize), String> {
-    if deletions
-        .iter()
-        .any(|d| !(d.at.x.is_finite() && d.at.y.is_finite()))
-    {
+/// Delete the listed nodes by hand, one after another. The two pieces
+/// meeting at a node become one from the node before to the node after,
+/// fitted to the curve the two drew along their outer tangents (`refitted`),
+/// so the outline stays where one cubic can follow it. A node that is not in
+/// the document, or that `deletion_refusal` refuses there, is skipped (a
+/// later trace may no longer have it, or have it as a junction), and a node
+/// listed twice takes its first listing. The new piece is worked out once,
+/// from the first outline through the node, and every outline through it
+/// gets that piece or its reverse, so both fills of a shared edge stay
+/// sealed. Returns the rewritten SVG and how many nodes went.
+pub fn delete_nodes(svg: &str, nodes: &[Point]) -> Result<(String, usize), String> {
+    if nodes.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
         return Err("A node to delete must have a finite position".into());
     }
-    if deletions.is_empty() {
+    if nodes.is_empty() {
         return Ok((svg.to_owned(), 0));
     }
     let (ranges, mut paths) = parse_all_paths(svg)?;
     let mut listed = HashSet::new();
     let mut deleted = 0;
-    for deletion in deletions {
-        let node = key(deletion.at);
+    for &at in nodes {
+        let node = key(at);
         if !listed.insert(node) || refusal(&paths, node).is_some() {
             continue;
         }
@@ -278,11 +265,7 @@ pub fn delete_nodes(svg: &str, deletions: &[NodeDeletion]) -> Result<(String, us
         }) else {
             continue;
         };
-        let piece = if deletion.keep_shape {
-            refitted(&arriving, &leaving_edge)
-        } else {
-            joined(&arriving, &leaving_edge)
-        };
+        let piece = refitted(&arriving, &leaving_edge);
         let pair = (arriving.key().0, leaving_edge.key().0);
         for subpath in paths.iter_mut().flatten() {
             let Some(i) = leaving_index(subpath, node) else {
@@ -550,45 +533,10 @@ mod tests {
     }
 
     #[test]
-    fn a_deleted_node_keeps_the_outer_handles_in_both_fills() {
+    fn a_deleted_node_stays_on_the_curve_and_sealed_in_both_fills() {
         let at = point(10., 10.);
         assert_eq!(deletion_refusal(SHARED_S, at).unwrap(), None);
-        let deletion = NodeDeletion {
-            at,
-            keep_shape: false,
-        };
-        let (svg, count) = delete_nodes(SHARED_S, &[deletion]).unwrap();
-        assert_eq!(count, 1);
-        assert!(!svg.contains("10.00 10.00"), "{svg}");
-        // One piece with the two outer handles, each fill walking it its way.
-        assert!(svg.contains("C 12.00 3.00 8.00 17.00 10.00 20.00"), "{svg}");
-        assert!(svg.contains("C 8.00 17.00 12.00 3.00 10.00 0.00"), "{svg}");
-        // Listed twice, the node goes once; listed again, it is gone.
-        let (again, count) = delete_nodes(SHARED_S, &[deletion, deletion]).unwrap();
-        assert_eq!((again.as_str(), count), (svg.as_str(), 1));
-        assert_eq!(delete_nodes(&svg, &[deletion]).unwrap(), (svg.clone(), 0));
-    }
-
-    #[test]
-    fn a_node_deleted_keeping_the_shape_stays_on_the_curve_and_sealed() {
-        let at = point(10., 10.);
-        let plain = delete_nodes(
-            SHARED_S,
-            &[NodeDeletion {
-                at,
-                keep_shape: false,
-            }],
-        )
-        .unwrap()
-        .0;
-        let (svg, count) = delete_nodes(
-            SHARED_S,
-            &[NodeDeletion {
-                at,
-                keep_shape: true,
-            }],
-        )
-        .unwrap();
+        let (svg, count) = delete_nodes(SHARED_S, &[at]).unwrap();
         assert_eq!(count, 1);
         assert!(!svg.contains("10.00 10.00"), "{svg}");
         let fills = cubics(&svg);
@@ -603,14 +551,21 @@ mod tests {
             [n(b3), n(b2), n(b1), n(b0)],
             "{svg}"
         );
-        // It follows the S far closer than the plain join does.
+        // It follows the S far closer than keeping the two outer handles
+        // would (what Delete node did before September 25, 2026: the owner's
+        // rounded corner came out bent).
+        let s = &cubics(SHARED_S)[0];
         let kept = off_the_s(&red[0]);
-        let joined = off_the_s(&cubics(&plain)[0][0]);
-        assert!(kept < 0.5 && kept < joined / 2., "{kept} against {joined}");
+        let plain = off_the_s(&joined(&s[0], &s[1]));
+        assert!(kept < 0.5 && kept < plain / 2., "{kept} against {plain}");
+        // Listed twice, the node goes once; listed again, it is gone.
+        let (again, count) = delete_nodes(SHARED_S, &[at, at]).unwrap();
+        assert_eq!((again.as_str(), count), (svg.as_str(), 1));
+        assert_eq!(delete_nodes(&svg, &[at]).unwrap(), (svg.clone(), 0));
     }
 
     #[test]
-    fn keeping_the_shape_is_never_further_off_than_the_plain_join() {
+    fn a_refit_is_never_further_off_than_the_plain_join() {
         // A corner between a line and a curve, walked both ways.
         let line = Edge::line(point(0., 0.), point(10., 0.), false);
         let curve = Edge {
@@ -642,34 +597,21 @@ mod tests {
 
     #[test]
     fn an_outlines_first_node_goes_and_two_lines_become_one() {
-        // The red square's first node: its closing line and first line join.
-        let (svg, count) = delete_nodes(
-            SVG,
-            &[NodeDeletion {
-                at: point(0., 0.),
-                keep_shape: false,
-            }],
-        )
-        .unwrap();
+        // The red square's first node: its closing line and first line become
+        // one piece, and the outline now starts where its last piece did.
+        let (svg, count) = delete_nodes(SVG, &[point(0., 0.)]).unwrap();
         assert_eq!(count, 1);
+        let red = svg.split("d=\"").nth(1).unwrap();
+        assert!(red.starts_with(" M 0.00 10.00 C "), "{svg}");
         assert!(
-            svg.contains(
-                "d=\" M 0.00 10.00 L 10.00 0.00 C 12.00 3.00 12.00 7.00 10.00 10.00 L 0.00 10.00 Z\""
-            ),
+            red.contains(" 10.00 0.00 C 12.00 3.00 12.00 7.00 10.00 10.00 L 0.00 10.00 Z\""),
             "{svg}"
         );
-        // Two lines running on in one direction stay one line when refitted.
+        // Two lines running on in one direction stay one line.
         let straight = "<svg viewBox=\"0 0 20 20\">\
             <path fill=\"#000000\" d=\" M 0.00 0.00 L 5.00 0.00 L 10.00 0.00 L 10.00 10.00 L 0.00 10.00 Z\" />\
             </svg>";
-        let (svg, _) = delete_nodes(
-            straight,
-            &[NodeDeletion {
-                at: point(5., 0.),
-                keep_shape: true,
-            }],
-        )
-        .unwrap();
+        let (svg, _) = delete_nodes(straight, &[point(5., 0.)]).unwrap();
         assert!(
             svg.contains("d=\" M 0.00 0.00 L 10.00 0.00 L 10.00 10.00 L 0.00 10.00 Z\""),
             "{svg}"
@@ -681,17 +623,7 @@ mod tests {
         // Where the two squares and their shared curve meet, three pieces.
         let junction = point(10., 10.);
         assert_eq!(deletion_refusal(SVG, junction).unwrap(), Some(JUNCTION));
-        assert_eq!(
-            delete_nodes(
-                SVG,
-                &[NodeDeletion {
-                    at: junction,
-                    keep_shape: true,
-                }],
-            )
-            .unwrap(),
-            (SVG.to_owned(), 0)
-        );
+        assert_eq!(delete_nodes(SVG, &[junction]).unwrap(), (SVG.to_owned(), 0));
         let triangle = "<svg viewBox=\"0 0 20 20\">\
             <path fill=\"#000000\" d=\" M 0.00 0.00 L 10.00 0.00 L 10.00 10.00 Z\" />\
             <path fill=\"#ffffff\" d=\" M 12.00 0.00 L 15.00 0.00 L 18.00 3.00\" />\
@@ -710,13 +642,6 @@ mod tests {
             deletion_refusal(triangle, point(3., 3.)).unwrap(),
             Some(ABSENT)
         );
-        assert!(delete_nodes(
-            SVG,
-            &[NodeDeletion {
-                at: point(f64::NAN, 0.),
-                keep_shape: false,
-            }]
-        )
-        .is_err());
+        assert!(delete_nodes(SVG, &[point(f64::NAN, 0.)]).is_err());
     }
 }

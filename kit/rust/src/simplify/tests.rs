@@ -842,3 +842,49 @@ fn no_merge_adds_a_turn_back_the_pieces_did_not_have() {
         "no fit turned back, so the test proves nothing"
     );
 }
+
+/// The white rounded square under the owner's GitHub mark as the engine
+/// traces it (work/octocat/octocat.png, corners of radius 48 px): the fitter
+/// cut the left edge short at y = 82, 14 px before its corner's arc begins,
+/// and left a piece holding that stretch and the arc's start, so at Auto's
+/// tolerance for artwork that corner kept three nodes where the other three
+/// had two (the owner, September 25, 2026). The piece goes into the edge and
+/// the arc: every node sits on a straight edge, two to a corner.
+#[test]
+fn a_piece_holding_an_edges_end_and_a_curves_start_goes_into_both() {
+    let d = " M 69.56 20.78 C 72.66 20.2 75.83 20.03 78.99 20 C 238.99 19.99 398.99 20.01 559 19.99 C 586.92 18.57 611.9 45.43 610 73 C 609.96 233.01 610.06 393.02 609.95 553.03 C 610.02 577.92 587.92 600.02 563.03 599.96 C 402.35 600.06 241.67 599.96 80.99 600.01 C 54.84 601.32 31.07 577.74 30.02 552.04 C 29.98 395.36 30.01 238.68 30 82 C 30.19 72.93 29.2 63.62 31.88 54.8 C 36.63 37.52 51.88 23.74 69.56 20.78 Z";
+    let svg = document(&[("#ffffff", d.to_owned())]);
+    let tolerance = 0.3;
+    let (out, stats) = simplify_svg(
+        &svg,
+        SimplifyOptions {
+            tolerance,
+            smooth_kinks: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(stats.segments_after, 8, "{out}");
+    let before = parse_path_data(d).unwrap().remove(0).edges;
+    let after = parse_path_data(&path_data(&out)[0])
+        .unwrap()
+        .remove(0)
+        .edges;
+    for node in after.iter().map(Edge::start) {
+        let on_edge = [node.x - 30., node.x - 610., node.y - 20., node.y - 600.]
+            .iter()
+            .any(|off| off.abs() < 0.5);
+        assert!(on_edge, "a node off the edges at {node:?}: {out}");
+    }
+    // Still within the tolerance of the traced outline everywhere.
+    let drawn: Vec<Point> = after
+        .iter()
+        .flat_map(|e| (0..=2000).map(move |k| e.cubic.evaluate(k as f64 / 2000.)))
+        .collect();
+    for p in before.iter().flat_map(samples) {
+        let off = drawn
+            .iter()
+            .map(|q| distance(p, *q))
+            .fold(f64::INFINITY, f64::min);
+        assert!(off <= tolerance + 0.05, "{off} px off at {p:?}");
+    }
+}

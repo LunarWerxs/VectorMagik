@@ -776,7 +776,7 @@ impl Desktop {
         let mut pick: Option<Option<Reach>> = None;
         let mut square: Option<bool> = None;
         let mut put_back = false;
-        let mut delete: Option<bool> = None;
+        let mut delete = false;
         menu_popup(
             egui::Id::new("node-menu").with((node.x.to_bits(), node.y.to_bits())),
             ctx,
@@ -846,27 +846,13 @@ impl Desktop {
             if ui
                 .add_enabled(refusal.is_none(), egui::Button::new("Delete node"))
                 .on_hover_text(
-                    "Takes the node out: one piece runs from the node before to the node \
-                     after, keeping their outer handles.",
-                )
-                .on_disabled_hover_text(why)
-                .clicked()
-            {
-                delete = Some(false);
-            }
-            if ui
-                .add_enabled(
-                    refusal.is_none(),
-                    egui::Button::new("Delete, keep the shape"),
-                )
-                .on_hover_text(
                     "Takes the node out and fits one curve to the two pieces, so the \
                      outline stays where one curve can follow it.",
                 )
                 .on_disabled_hover_text(why)
                 .clicked()
             {
-                delete = Some(true);
+                delete = true;
             }
         });
         match pick {
@@ -888,10 +874,10 @@ impl Desktop {
         if put_back {
             self.put_back(node);
         }
-        if let Some(keep_shape) = delete {
-            self.delete_node(node, keep_shape);
+        if delete {
+            self.delete_node(node);
         }
-        if !open || pick.is_some() || square.is_some() || put_back || delete.is_some() {
+        if !open || pick.is_some() || square.is_some() || put_back || delete {
             self.node_menu = None;
         }
     }

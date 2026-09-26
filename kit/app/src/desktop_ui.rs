@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use vector_rebuild::clock::Stopwatch;
 use vector_rebuild::geometry::Point;
-use vector_rebuild::nodes::{NodeDeletion, NodeMove, NodePiece};
+use vector_rebuild::nodes::{NodeMove, NodePiece};
 use vector_rebuild::raster::Raster;
 use vector_rebuild::regularize::RegularizeOptions;
 use vector_rebuild::shapes::{self, Island, Removal};
@@ -281,7 +281,7 @@ struct Edits {
     rounded: Vec<Rounded>,
     straightened: Vec<Point>,
     moved: Vec<NodeMove>,
-    deleted_nodes: Vec<NodeDeletion>,
+    deleted_nodes: Vec<Point>,
     deleted: Vec<Removal>,
     prep: Preparation,
     conversion: ConversionSettings,
@@ -672,7 +672,7 @@ struct DeriveSettings {
     straighten: Option<StraightenOptions>,
     straightened: Vec<Point>,
     moved: Vec<NodeMove>,
-    deleted_nodes: Vec<NodeDeletion>,
+    deleted_nodes: Vec<Point>,
     rounded: Vec<Rounding>,
     sticker: Option<Sticker>,
 }
@@ -857,7 +857,7 @@ pub struct Desktop {
     moved: Vec<NodeMove>,
     /// Nodes the user deleted from their right-click menu, keyed where the
     /// moves left them: applied after the moves and before the rounding.
-    deleted_nodes: Vec<NodeDeletion>,
+    deleted_nodes: Vec<Point>,
     /// The node marker being dragged, if one is.
     node_drag: Option<NodeDrag>,
     /// The right-clicked node and where its menu opened.
