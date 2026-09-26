@@ -22,6 +22,7 @@ suite! {
     automatic,
     engine,
     export,
+    mcp,
     region,
     relocation,
     simplify,

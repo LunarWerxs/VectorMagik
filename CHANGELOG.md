@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.0 (September 26, 2026)
+
+- For AI assistants: `vector-magic-rebuild --mcp` is an MCP server, so Claude, Cursor and
+  other assistants can trace pictures on your computer: vectorize (the app's Auto settings
+  unless asked otherwise, with a picture of the result), inspect (what a file is and what
+  Auto would choose) and view (any picture or vector file as an image).
+- The engine alone: a download per system with just the command-line program, for an
+  assistant or a script that does not need the window.
+
 ## 0.4.6 (September 26, 2026)
 
 - Try a sample: the empty window opens and converts a sample logo in one click.

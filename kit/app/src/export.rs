@@ -159,11 +159,34 @@ fn png(svg: &str) -> Result<Vec<u8>, String> {
     if u64::from(width) * u64::from(height) > MAX_PNG_PIXELS {
         return Err("The drawing is too large to save as a PNG".into());
     }
+    rendered_png(&tree, width, height, 1.)
+}
+
+/// `svg` as a PNG whose longer side is `longest` pixels, on transparency:
+/// the picture the engine's MCP tools show (a drawing is sharp at any size).
+#[cfg(feature = "render")]
+pub fn preview_png(svg: &str, longest: u32) -> Result<Vec<u8>, String> {
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .map_err(|e| e.to_string())?;
+    let size = tree.size();
+    let scale = longest as f32 / size.width().max(size.height()).max(1e-3);
+    let width = ((size.width() * scale).round() as u32).max(1);
+    let height = ((size.height() * scale).round() as u32).max(1);
+    rendered_png(&tree, width, height, scale)
+}
+
+#[cfg(feature = "render")]
+fn rendered_png(
+    tree: &resvg::usvg::Tree,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> Result<Vec<u8>, String> {
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(width, height).ok_or("Could not allocate the PNG")?;
     resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::identity(),
+        tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
     let rgba: Vec<u8> = pixmap
@@ -174,10 +197,16 @@ fn png(svg: &str) -> Result<Vec<u8>, String> {
             [c.red(), c.green(), c.blue(), c.alpha()]
         })
         .collect();
+    png_bytes(&rgba, width, height)
+}
+
+/// Straight (not premultiplied) RGBA pixels, `width` by `height`, as a PNG
+/// file's bytes.
+pub fn png_bytes(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let mut data = Vec::new();
     image::ImageEncoder::write_image(
         image::codecs::png::PngEncoder::new(&mut data),
-        &rgba,
+        rgba,
         width,
         height,
         image::ExtendedColorType::Rgba8,

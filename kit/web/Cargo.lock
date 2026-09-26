@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "vector-magic-rebuild"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -850,7 +850,7 @@ version = "0.1.0"
 
 [[package]]
 name = "vectormagik-web"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "egui",
  "vector-magic-rebuild",

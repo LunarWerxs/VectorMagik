@@ -52,6 +52,8 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac 
 
 **[VectorMagik for Linux (x64)](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-linux-x64.tar.gz)**: unpack it anywhere and run `./VectorMagik`. It runs on X11 or Wayland, on any distribution as new as Ubuntu 22.04 or Debian 12, and uses zenity or kdialog for the Open and Save dialogs.
 
+**The engine alone**, for an AI assistant or a script, without the window: [Windows](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-windows-x64.zip) · [macOS](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-macos-universal.zip) · [Linux](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-linux-x64.tar.gz) ([how](#for-ai-assistants-mcp)).
+
 No download? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.com/app/)**: the same app, on your own computer. The desktop app adds working with no internet at all, the command line and pictures up to 100 megapixels (50 in a tab); on Windows, dragging the file straight out of the window.
 
 ## What it does
@@ -82,6 +84,28 @@ vector-magic-rebuild picture.png -o picture.svg --category auto --quality auto -
 ```
 
 The app's own chain is `--category auto --quality auto --simplify auto --regularize 0.8 --straighten auto --primitives on --stack on`. Run it with `--help` for every option.
+
+## For AI assistants (MCP)
+
+The same program is an [MCP](https://modelcontextprotocol.io) server: started with `--mcp`, it lets an AI assistant trace pictures on your computer. Download [the engine alone](#download) (or use the one beside the app) and add it to your assistant. In Claude Code:
+
+```text
+claude mcp add vectormagik -- /path/to/vector-magic-rebuild --mcp
+```
+
+In Claude Desktop, Cursor and other clients, the server's entry is:
+
+```json
+"vectormagik": { "command": "/path/to/vector-magic-rebuild", "args": ["--mcp"] }
+```
+
+The assistant gets three tools:
+
+- **vectorize**: trace a picture and save it as SVG, PDF, EPS, AI, DXF, EMF or PNG, with the app's Auto settings unless it asks for others, and see a picture of the result. Vector files (SVG, PDF, AI, EPS) are converted as they are or traced.
+- **inspect**: a file's size, transparency and colours, and the image type and quality Auto would choose.
+- **view**: any picture or vector file as an image the assistant can look at.
+
+It runs only on your computer, reads and writes the files it is given, and never goes online.
 
 ## Build from source
 

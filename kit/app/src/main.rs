@@ -3,13 +3,9 @@ use vector_magic_rebuild::engine::{self, Options as EngineOptions};
 use vector_magic_rebuild::export::{DxfMode, ExportOptions};
 use vector_rebuild::{ImageCategory, Quality};
 
-fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args_os()
-        .skip(1)
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    if args.is_empty() || args[0] == "--help" {
-        println!("Vector Magic rebuild: the recovered engine, in Rust alone
+mod mcp;
+
+const HELP: &str = "Vector Magic rebuild: the recovered engine, in Rust alone
 Usage: vector-magic-rebuild INPUT -o OUTPUT.svg|.pdf|.eps|.ai|.dxf|.emf|.png [--category blended|unblended|photo|auto] [--quality high|medium|low|auto]
 PNG, JPEG, GIF, BMP and PNM are supported. Default: blended artwork, high source quality; auto takes the image type or the source quality the desktop's Auto detects in the prepared image (both auto are the desktop's Auto settings).
 Opaque photographs use seam overlap; --photo-seams native keeps the engine's own output.
@@ -26,10 +22,20 @@ No original binary, host process or extracted engine is needed; nothing is downl
 --straighten 0.8 draws curve pieces that bow at most that many source pixels (or 3% of their length per pixel of it) as straight lines and snaps lines within three degrees of horizontal or vertical, moving no node more than a pixel (owned post-processing, off by default; the desktop has it on); --straighten auto takes the bow the desktop's Auto does for the kind of picture traced: 0.2 on anti-aliased artwork, 0.65 on aliased artwork, 1.2 on photographs.
 --vector convert|trace[:SIDE] says what to do with a vector input (SVG, PDF, Illustrator AI, EPS): convert saves its own shapes as they are in the output's format; trace draws it SIDE pixels on its longer side (2000 unless given, up to 4096) and traces that like any picture. Without it a vector input is refused with both choices named. Photoshop PSD and PSB inputs are traced like any picture.
 The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Illustrator file), DXF, EMF (Windows' Enhanced Metafile; like EPS it refuses partial transparency) or PNG (the drawing as pixels at its declared size, 96 per inch; builds with the render or desktop feature). The export settings are the original's: --no-color-groups places shapes in cut-outs without grouping them by colour; --stroke-boundaries strokes every filled shape with its own colour at width 0.09375, which hides hairline seams; --dxf splines|fine|coarse writes a DXF's curves as spline curves (R2000, the default) or as lines within 0.05 pt (fine) or 0.5 pt (coarse) of them (R12).
---sticker on|BORDER,RIM[,shadow] paints a die-cut sticker outline under the shapes (a black border, a white rim, an optional shadow; on sizes them for the image) and grows the canvas to fit; --cut-background on first removes the background shapes of an opaque image so the outline hugs the object (both owned post-processing).");
-        return Ok(());
-    }
-    let cli = parse_args(&args)?;
+--sticker on|BORDER,RIM[,shadow] paints a die-cut sticker outline under the shapes (a black border, a white rim, an optional shadow; on sizes them for the image) and grows the canvas to fit; --cut-background on first removes the background shapes of an opaque image so the outline hugs the object (both owned post-processing).
+--mcp (alone) serves this engine to an AI assistant over the Model Context Protocol, one JSON-RPC message per line on stdin and stdout: tools vectorize, inspect and view.";
+
+/// What a conversion leaves: the lines the command line prints and the
+/// drawing it saved (which the MCP server shows).
+pub(crate) struct Outcome {
+    pub(crate) report: String,
+    pub(crate) svg: String,
+}
+
+/// One conversion, as the command line's arguments say (`args[0]` the
+/// input); what it left out of a vector input goes to `notes`.
+pub(crate) fn run(args: &[String], notes: &mut Vec<String>) -> Result<Outcome, String> {
+    let cli = parse_args(args)?;
     // Loaded as the desktop loads: up to 100 megapixels, scaled to the
     // engine's limits and a 1 px side doubled, the drawing then declared at
     // the picture's own size (the defect sweep of September 23, 2026: the
@@ -49,7 +55,7 @@ The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Ill
                 )
             })?;
         for note in &imported.skipped {
-            eprintln!("Left out: {note}");
+            notes.push(format!("Left out: {note}"));
         }
         vector_magic_rebuild::export::write_vector(
             &cli.input,
@@ -57,20 +63,23 @@ The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Ill
             &imported.svg,
             &cli.export,
         )?;
-        println!(
-            "{{\"converted\":\"{}\",\"shapes\":{},\"pages\":1,\"left_out\":{}}}",
+        let report = format!(
+            "{{\"converted\":\"{}\",\"shapes\":{},\"pages\":1,\"left_out\":{}}}\n",
             kind.label(),
             imported.svg.matches("<path").count(),
             imported.skipped.len()
         );
-        return Ok(());
+        return Ok(Outcome {
+            report,
+            svg: imported.svg,
+        });
     }
     let raster = if kind.is_vector() {
         // A vector file: converted as it is, or drawn as a picture and
         // traced, as the window asks.
         let imported = vector_magic_rebuild::import::read_vector(kind, &bytes)?;
         for note in &imported.skipped {
-            eprintln!("Left out: {note}");
+            notes.push(format!("Left out: {note}"));
         }
         let shapes = imported.svg.matches("<path").count();
         if shapes == 0 {
@@ -83,10 +92,10 @@ The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Ill
                         cli.input.display()
                     ));
                 }
-                eprintln!(
+                notes.push(format!(
                     "{} holds a picture, not shapes: tracing the picture.",
                     cli.input.display()
-                );
+                ));
                 let (raster, loaded_as) = vector_magic_rebuild::fit_for_engine(picture)?;
                 return run_engine(cli, raster, loaded_as);
             }
@@ -108,13 +117,16 @@ The output's extension picks its format: SVG, PDF, EPS, AI (a PDF-compatible Ill
                     &imported.svg,
                     &cli.export,
                 )?;
-                println!(
-                    "{{\"converted\":\"{}\",\"shapes\":{shapes},\"pages\":{},\"left_out\":{}}}",
+                let report = format!(
+                    "{{\"converted\":\"{}\",\"shapes\":{shapes},\"pages\":{},\"left_out\":{}}}\n",
                     kind.label(),
                     imported.pages,
                     imported.skipped.len()
                 );
-                return Ok(());
+                return Ok(Outcome {
+                    report,
+                    svg: imported.svg,
+                });
             }
             #[cfg(feature = "render")]
             VectorArg::Trace(side) => vector_magic_rebuild::import::rasterize(&imported, side)?,
@@ -407,7 +419,7 @@ fn run_engine(
     cli: Cli,
     raster: vector_rebuild::raster::Raster,
     loaded_as: Option<(usize, usize)>,
-) -> Result<(), String> {
+) -> Result<Outcome, String> {
     let Cli {
         input,
         vector: _,
@@ -517,15 +529,15 @@ fn run_engine(
         svg
     };
     vector_magic_rebuild::export::write_vector(&input, &output, &svg, &export)?;
-    print!("{}", doc.statistics_json());
+    let mut report = doc.statistics_json();
     if let Some((width, height)) = loaded_as {
-        println!(
-            "Traced {width} x {height} px at {} x {} px, the engine's limits, and saved at {width} x {height}",
+        report += &format!(
+            "Traced {width} x {height} px at {} x {} px, the engine's limits, and saved at {width} x {height}\n",
             raster.width, raster.height
         );
     }
-    println!("Saved {}", output.display());
-    Ok(())
+    report += &format!("Saved {}\n", output.display());
+    Ok(Outcome { report, svg })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -551,7 +563,30 @@ enum StickerArg {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let result = match args.as_slice() {
+        [] => {
+            println!("{HELP}");
+            Ok(())
+        }
+        [first, ..] if first == "--help" => {
+            println!("{HELP}");
+            Ok(())
+        }
+        [only] if only == "--mcp" => mcp::serve(),
+        _ => {
+            let mut notes = Vec::new();
+            let outcome = run(&args, &mut notes);
+            for note in &notes {
+                eprintln!("{note}");
+            }
+            outcome.map(|outcome| print!("{}", outcome.report))
+        }
+    };
+    if let Err(error) = result {
         eprintln!("Error: {error}");
         std::process::exit(2);
     }
