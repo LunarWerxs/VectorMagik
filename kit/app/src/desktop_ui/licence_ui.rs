@@ -365,7 +365,7 @@ impl Desktop {
                 {
                     answer = Some(LicenceUse::Trial(now));
                 }
-                if self.prompt_key {
+                reveal(ui, "licence-key", self.prompt_key, |ui| {
                     ui.add_space(2.);
                     ui.label(
                         RichText::new("Paste the license key from your purchase email:")
@@ -451,7 +451,7 @@ impl Desktop {
                             egui::Label::new(RichText::new(text).size(11.5).color(p.warn)).wrap(),
                         );
                     }
-                }
+                });
                 ui.label(
                     RichText::new(
                         "You can change this later in the License card at the bottom of \

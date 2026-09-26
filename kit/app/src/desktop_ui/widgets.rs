@@ -111,6 +111,8 @@ pub(super) fn card(
                 *open,
             );
             state.set_open(*open);
+            let openness = state.openness(ui.ctx());
+            let backdrop = ui.painter().add(egui::Shape::Noop);
             let heading = ui
                 .horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.;
@@ -122,17 +124,22 @@ pub(super) fn card(
                         egui::Label::new(heading.family(family.clone()).color(p.heading))
                             .selectable(false),
                     );
-                    if (!*open || summary_open) && !summary.is_empty() {
+                    let shown = if summary_open { 1. } else { 1. - openness };
+                    if shown > 0. && !summary.is_empty() {
                         ui.add(
-                            egui::Label::new(RichText::new(summary).size(11.5).color(pal().dim))
-                                .selectable(false)
-                                .truncate(),
+                            egui::Label::new(
+                                RichText::new(summary)
+                                    .size(11.5)
+                                    .color(pal().dim.gamma_multiply(shown)),
+                            )
+                            .selectable(false)
+                            .truncate(),
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (rect, _) =
                             ui.allocate_exact_size(Vec2::new(12., 12.), egui::Sense::hover());
-                        chevron(ui, rect, state.openness(ui.ctx()));
+                        chevron(ui, rect, openness, pal().faint);
                     });
                 })
                 .response;
@@ -140,11 +147,26 @@ pub(super) fn card(
             if heading.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
+            let lit = ui.ctx().animate_bool_with_time(
+                heading.id.with("lit"),
+                heading.hovered() || heading.has_focus(),
+                0.12,
+            );
+            if lit > 0. {
+                ui.painter().set(
+                    backdrop,
+                    egui::epaint::RectShape::filled(
+                        heading.rect.expand2(Vec2::new(6., 3.)),
+                        8,
+                        pal().hover.gamma_multiply(lit),
+                    ),
+                );
+            }
             if heading
                 .on_hover_text(if *open {
-                    "Click to fold this card"
+                    "Click to hide"
                 } else {
-                    "Click to open this card"
+                    "Click to show"
                 })
                 .clicked()
             {
@@ -161,20 +183,49 @@ pub(super) fn card(
 
 /// Settings most pictures never need, folded under a quiet "More options"
 /// row that opens them in place; open or folded is remembered for the
-/// session.
+/// session. The row is a disclosure control like a card's heading: its
+/// chevron turns as it opens and it lights up under the pointer (bare accent
+/// text before September 26, 2026, which read as a stray link).
 pub(super) fn more_options(ui: &mut egui::Ui, name: &str, body: impl FnOnce(&mut egui::Ui)) {
     let id = ui.make_persistent_id(("more-options", name));
     let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
     ui.add_space(2.);
-    let label = RichText::new(if open {
-        "Fewer options"
-    } else {
-        "More options"
-    })
-    .size(12.)
-    .color(pal().accent);
-    if ui
-        .add(egui::Label::new(label).sense(egui::Sense::click()))
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
+    let ctx = ui.ctx().clone();
+    let lit = ctx.animate_bool_with_time(
+        response.id.with("lit"),
+        response.hovered() || response.has_focus(),
+        0.12,
+    );
+    let turn = ctx.animate_bool_with_time(response.id.with("turn"), open, 0.18);
+    let p = pal();
+    if lit > 0. {
+        ui.painter()
+            .rect_filled(rect, 8., p.hover.gamma_multiply(lit));
+    }
+    ui.painter().text(
+        rect.left_center() + Vec2::new(6., 0.),
+        Align2::LEFT_CENTER,
+        "More options",
+        FontId::proportional(12.),
+        p.dim.lerp_to_gamma(p.text, lit),
+    );
+    chevron(
+        ui,
+        egui::Rect::from_center_size(rect.right_center() - Vec2::new(12., 0.), Vec2::splat(12.)),
+        turn,
+        p.faint.lerp_to_gamma(p.text, lit),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::CollapsingHeader,
+            true,
+            open,
+            "More options",
+        )
+    });
+    if response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
     {
@@ -198,18 +249,89 @@ pub(super) fn card_frame() -> egui::Frame {
 }
 
 /// The fold mark of a card heading: a small triangle pointing right when
-/// folded and down when open, turning with the fold's animation.
-fn chevron(ui: &egui::Ui, rect: egui::Rect, openness: f32) {
+/// folded and down when open, turning with the fold's animation (3 turns it
+/// round to point up).
+pub(super) fn chevron(ui: &egui::Ui, rect: egui::Rect, openness: f32, color: Color32) {
     let angle = (openness - 1.) * std::f32::consts::FRAC_PI_2;
     let (sin, cos) = angle.sin_cos();
     let turn = |x: f32, y: f32| rect.center() + Vec2::new(x * cos - y * sin, x * sin + y * cos);
     // Pointing down at rest; turned a quarter back when folded.
     let points = vec![turn(-4., -2.), turn(4., -2.), turn(0., 3.)];
-    ui.painter().add(egui::Shape::convex_polygon(
-        points,
-        pal().faint,
-        Stroke::NONE,
-    ));
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
+/// A combo box's mark: the cards' small triangle, pointing down, up while
+/// its list is open (egui's own filled arrow was twice as heavy).
+pub(super) fn combo_mark(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    visuals: &egui::style::WidgetVisuals,
+    open: bool,
+) {
+    let mark = egui::Rect::from_center_size(rect.center(), Vec2::splat(11.));
+    chevron(
+        ui,
+        mark,
+        if open { 3. } else { 1. },
+        visuals.fg_stroke.color,
+    );
+}
+
+/// Undo, or Redo when `redo`, in the toolbar: a hooked arrow drawn as a
+/// line, the same on every system (the fonts' arrows drew a few pixels high).
+pub(super) fn history_button(ui: &mut egui::Ui, redo: bool, enabled: bool) -> egui::Response {
+    let response = ui.add_enabled(
+        enabled,
+        egui::Button::new("")
+            .min_size(Vec2::new(36., 32.))
+            .frame_when_inactive(true)
+            .corner_radius(CornerRadius::same(16)),
+    );
+    let color = if enabled { pal().text } else { pal().faint };
+    let stroke = Stroke::new(1.6_f32, color);
+    let centre = response.rect.center() + Vec2::new(0., 1.);
+    let flip = if redo { -1. } else { 1. };
+    let (from, to) = (30_f32.to_radians(), -210_f32.to_radians());
+    let at = |a: f32| centre + Vec2::new(flip * 5.5 * a.cos(), 5.5 * a.sin());
+    let points: Vec<egui::Pos2> = (0..=16)
+        .map(|i| at(from + (to - from) * i as f32 / 16.))
+        .collect();
+    ui.painter().add(egui::Shape::line(points, stroke));
+    // The head at the arc's end, along its way.
+    let end = at(to);
+    let back = -Vec2::new(flip * to.sin(), -to.cos()).normalized();
+    for turn in [-0.65_f32, 0.65] {
+        let (sin, cos) = turn.sin_cos();
+        let wing = Vec2::new(back.x * cos - back.y * sin, back.x * sin + back.y * cos);
+        ui.painter().line_segment([end, end + wing * 4.2], stroke);
+    }
+    response
+}
+
+/// A toolbar icon button that fills with the accent while `lit` (0 to 1,
+/// eased by the caller): the next step once a vector is ready.
+pub(super) fn lit_icon_button(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    enabled: bool,
+    lit: f32,
+) -> egui::Response {
+    let p = pal();
+    let mut button = egui::Button::new(
+        RichText::new(glyph)
+            .size(15.)
+            .color(p.text.lerp_to_gamma(p.on_accent, lit)),
+    )
+    .min_size(Vec2::new(36., 32.))
+    .frame_when_inactive(true)
+    .corner_radius(CornerRadius::same(16));
+    if lit > 0. {
+        button = button
+            .fill(p.chip.lerp_to_gamma(p.accent, lit))
+            .stroke(Stroke::new(1_f32, p.edge.lerp_to_gamma(p.accent, lit)));
+    }
+    ui.add_enabled(enabled, button)
 }
 
 /// Part of a card shown only while `open` (a switch is on), sliding open and
@@ -286,7 +408,7 @@ pub(super) fn toggle_row(
                 let text = ui.add(
                     egui::Label::new(RichText::new(label).color(pal().text))
                         .selectable(false)
-                        .sense(egui::Sense::click()),
+                        .sense(egui::Sense::CLICK),
                 );
                 if let Some(subtitle) = subtitle {
                     ui.label(RichText::new(subtitle).size(11.).color(pal().dim));
@@ -405,12 +527,8 @@ pub(super) fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
         let how_on = ui.ctx().animate_bool_responsive(response.id, *on);
         let visuals = ui.style().interact_selectable(&response, *on);
         let radius = 0.5 * rect.height();
-        let track = if *on { pal().accent } else { visuals.bg_fill };
-        let edge = if *on {
-            pal().accent
-        } else {
-            visuals.bg_stroke.color
-        };
+        let track = visuals.bg_fill.lerp_to_gamma(pal().accent, how_on);
+        let edge = visuals.bg_stroke.color.lerp_to_gamma(pal().accent, how_on);
         ui.painter().rect(
             rect,
             radius,
@@ -419,13 +537,21 @@ pub(super) fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
             StrokeKind::Inside,
         );
         let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
-        let knob = if *on { Color32::WHITE } else { pal().knob_off };
+        let knob = pal().knob_off.lerp_to_gamma(Color32::WHITE, how_on);
         let centre = egui::pos2(x, rect.center().y);
         ui.painter().circle_filled(centre, radius - 4., knob);
         if !pal().dark {
             // A white knob on a pale track needs an edge to be seen.
             ui.painter()
                 .circle_stroke(centre, radius - 4., Stroke::new(1_f32, pal().edge));
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.expand(2.),
+                radius + 2.,
+                Stroke::new(2_f32, pal().accent),
+                StrokeKind::Outside,
+            );
         }
     }
     response
@@ -440,6 +566,75 @@ pub(super) fn icon_button(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui
             .frame_when_inactive(true)
             .corner_radius(CornerRadius::same(16)),
     )
+}
+
+/// The toolbar's picture box: the folder and the picture's name, or "Pick an
+/// image" before one is open, as one control that opens the file picker. It
+/// lights up under the pointer and dips while pressed, easing between the
+/// two, so a click is seen to land (the owner, September 26, 2026: the box
+/// "should expand or have an animation when I click it").
+pub(super) fn open_box(
+    ui: &mut egui::Ui,
+    name: Option<&str>,
+    width: f32,
+    enabled: bool,
+) -> egui::Response {
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 32.), sense);
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let ctx = ui.ctx();
+    let lit =
+        ctx.animate_bool_with_time(response.id.with("lit"), enabled && response.hovered(), 0.15);
+    let down = ctx.animate_bool_with_time(
+        response.id.with("down"),
+        enabled && response.is_pointer_button_down_on(),
+        0.08,
+    );
+    let p = pal();
+    let shape = rect.shrink(down * 1.5);
+    ui.painter().rect(
+        shape,
+        CornerRadius::same(16),
+        p.chip.lerp_to_gamma(p.hover, lit),
+        Stroke::new(1_f32, p.edge.lerp_to_gamma(p.hover_edge, lit)),
+        StrokeKind::Inside,
+    );
+    let (text, color) = match name {
+        Some(name) => (name, p.text),
+        None if enabled => ("Pick an image", p.text),
+        None => ("Pick an image", p.faint),
+    };
+    ui.painter().text(
+        egui::pos2(shape.left() + 19., shape.center().y),
+        Align2::CENTER_CENTER,
+        super::icon::OPEN,
+        FontId::proportional(15.),
+        if name.is_none() && enabled {
+            p.accent
+        } else {
+            color
+        },
+    );
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        text.to_owned(),
+        FontId::proportional(13.5),
+        color,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width((shape.width() - 50.).max(10.));
+    let galley = ui.painter().layout_job(job);
+    let at = egui::pos2(shape.left() + 36., shape.center().y - galley.size().y / 2.);
+    ui.painter().galley(at, galley, color);
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
 }
 
 /// A rounded button with `text` at `size`, `min` wide and high, `radius` corners.
@@ -882,6 +1077,38 @@ pub(super) fn checkerboard(painter: &egui::Painter, rect: egui::Rect, visible: e
             );
         }
     }
+}
+
+/// A dashed outline with rounded corners (`radius`), as the welcome card's
+/// drop zone draws inside its rounded card.
+pub(super) fn dashed_round_rect(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    radius: f32,
+    stroke: Stroke,
+) {
+    let r = radius.min(rect.width() / 2.).min(rect.height() / 2.);
+    let mut points = Vec::new();
+    let corners = [
+        (
+            rect.right_top() + Vec2::new(-r, r),
+            -std::f32::consts::FRAC_PI_2,
+        ),
+        (rect.right_bottom() + Vec2::new(-r, -r), 0.),
+        (
+            rect.left_bottom() + Vec2::new(r, -r),
+            std::f32::consts::FRAC_PI_2,
+        ),
+        (rect.left_top() + Vec2::new(r, r), std::f32::consts::PI),
+    ];
+    for (centre, start) in corners {
+        for step in 0..=6 {
+            let a = start + step as f32 / 6. * std::f32::consts::FRAC_PI_2;
+            points.push(centre + r * Vec2::new(a.cos(), a.sin()));
+        }
+    }
+    points.push(points[0]);
+    painter.extend(egui::Shape::dashed_line(&points, stroke, 7., 6.));
 }
 
 pub(super) fn dashed_rect(painter: &egui::Painter, rect: egui::Rect, stroke: Stroke) {

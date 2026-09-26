@@ -26,9 +26,9 @@ impl Detection {
 }
 pub fn category_name(category: ImageCategory) -> &'static str {
     match category {
-        ImageCategory::AntiAliasedArtwork => "Logo with blending",
-        ImageCategory::AliasedArtwork => "Logo without blending",
-        ImageCategory::Photograph => "Photograph",
+        ImageCategory::AntiAliasedArtwork => "Artwork",
+        ImageCategory::AliasedArtwork => "Pixel art",
+        ImageCategory::Photograph => "Photo",
     }
 }
 

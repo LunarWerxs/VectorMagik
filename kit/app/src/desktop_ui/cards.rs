@@ -23,11 +23,13 @@ impl Desktop {
                     // Appearance button and the gaps. In a narrow window the
                     // app's name gives way first, then the picture's.
                     let (gaps, before_chips) = if narrow { (4., 0.) } else { (7., 6.) };
+                    let history = if narrow { 0. } else { (36. + gap) * 2. };
                     let fixed = settings
                         + 36. * 3.
                         + convert_width
                         + chips
                         + before_chips
+                        + history
                         + 36.
                         + gap * (gaps + 1.);
                     let title = 30. + 10. + 110. + 12.;
@@ -73,49 +75,62 @@ impl Desktop {
                     // The toolbar sits centred in the window, not in what is
                     // left beside the title: Open, the picture's name, Convert,
                     // Save, Close and the two view chips as one group.
-                    let group_width =
-                        36. * 3. + convert_width + name_width + chips + before_chips + gap * gaps;
+                    // Before a picture the group is the picture box alone:
+                    // Convert, Save, Close and the views have nothing to act
+                    // on, and four greyed controls read as broken.
+                    let working = self.raster.is_some() || self.foreign.is_some();
+                    // Alone, the picture box takes the room the rest would have
+                    // (on a phone it read "Pi...").
+                    let name_width = if working {
+                        name_width
+                    } else {
+                        (full.width() * 0.3)
+                            .clamp(170., 360.)
+                            .min(full.width() - lead - settings - 36. * 2. - gap * 3. - 24.)
+                    };
+                    let group_width = if working {
+                        36. * 3.
+                            + convert_width
+                            + name_width
+                            + chips
+                            + before_chips
+                            + history
+                            + gap * gaps
+                    } else {
+                        36. + gap + name_width
+                    };
                     let start = (full.center().x - group_width / 2.).max(ui.cursor().min.x + 12.);
                     ui.add_space((start - ui.cursor().min.x).max(0.));
                     ui.spacing_mut().item_spacing.x = gap;
-                    if icon_button(ui, icon::OPEN, idle)
-                        .on_hover_text(format!(
-                            "Open an image  ({})",
-                            ctx.format_shortcut(&SC_OPEN)
-                        ))
-                        .clicked()
-                    {
-                        actions.open = true;
-                    }
                     // The picture's name where a document window shows its
-                    // title (a typed path field before September 25, 2026;
-                    // pictures come from Open or a drop), its path on hover.
+                    // title, "Pick an image" before one, the folder beside it:
+                    // one control that opens the picker (a folder button
+                    // beside a grey "No image" before September 26, 2026).
                     let has_image = self.raster.is_some();
                     let name = std::path::Path::new(&self.loaded_path)
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .filter(|_| has_image);
-                    let (text, color) = match &name {
-                        Some(name) => (name.as_str(), pal().text),
-                        None => ("No image", pal().faint),
+                    let shortcut = ctx.format_shortcut(&SC_OPEN);
+                    let hover = match &name {
+                        Some(_) if !platform::IN_BROWSER => format!(
+                            "{}\nClick to open another image  ({shortcut})",
+                            self.loaded_path
+                        ),
+                        Some(_) => format!("Click to open another image  ({shortcut})"),
+                        None => format!("Open an image  ({shortcut})"),
                     };
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(name_width, 32.),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_min_width(name_width);
-                            let label = ui.add(
-                                egui::Label::new(RichText::new(text).size(13.5).color(color))
-                                    .truncate(),
-                            );
-                            if name.is_some() && !platform::IN_BROWSER {
-                                label.on_hover_text(&self.loaded_path);
-                            }
-                        },
-                    );
+                    if open_box(ui, name.as_deref(), 36. + gap + name_width, idle)
+                        .on_hover_text(hover)
+                        .clicked()
+                    {
+                        actions.open = true;
+                    }
                     let can_convert =
                         idle && self.raster.is_some() && self.path == self.loaded_path;
-                    if self.worker.is_some() {
+                    if !working {
+                        // Only the Appearance button at the far end.
+                    } else if self.worker.is_some() {
                         // While converting, the button stops the conversion.
                         if ui
                             .add(
@@ -139,47 +154,67 @@ impl Desktop {
                         actions.convert = true;
                     }
                     let can_save = (self.document.is_some() || self.foreign.is_some()) && idle;
-                    let save = icon_button(ui, icon::SAVE, can_save)
-                        .on_hover_text(format!(
-                            "Save as SVG, PDF or EPS, {}  ({})",
-                            if platform::IN_BROWSER {
-                                "as a download"
+                    // Save takes the accent once the vector is ready and
+                    // current: the next step moves along the toolbar.
+                    let fresh = can_save && self.document.is_some() && !self.conversion_stale();
+                    let lit = ctx.animate_bool_with_time(egui::Id::new("save-lit"), fresh, 0.15);
+                    if working {
+                        let save = lit_icon_button(ui, icon::SAVE, can_save, lit)
+                            .on_hover_text(format!(
+                                "Save as SVG, PDF or EPS, {}  ({})",
+                                if platform::IN_BROWSER {
+                                    "as a download"
+                                } else {
+                                    "or drag the file out"
+                                },
+                                ctx.format_shortcut(&SC_SAVE)
+                            ))
+                            .on_disabled_hover_text(if self.document.is_some() {
+                                "Waiting for the conversion, dialog or save to finish"
                             } else {
-                                "or drag the file out"
-                            },
-                            ctx.format_shortcut(&SC_SAVE)
-                        ))
-                        .on_disabled_hover_text(if self.document.is_some() {
-                            "Waiting for the conversion, dialog or save to finish"
-                        } else {
-                            "Convert an image first"
-                        });
-                    self.save_anchor = save.rect;
-                    if save.clicked() {
-                        actions.save = true;
-                    }
-                    if icon_button(ui, icon::CLOSE, idle && has_image)
-                        .on_hover_text(format!(
-                            "Close the image  ({})",
-                            ctx.format_shortcut(&SC_CLOSE)
-                        ))
-                        .clicked()
-                    {
-                        actions.close = true;
-                    }
-                    if !narrow {
-                        ui.add_space(6.);
-                        if choice_width(ui, "Side by side", self.view == View::SideBySide, 96.)
-                            .on_hover_text("The source and the vector next to each other")
-                            .clicked()
-                        {
-                            self.view = View::SideBySide;
+                                "Convert an image first"
+                            });
+                        self.save_anchor = save.rect;
+                        if save.clicked() {
+                            actions.save = true;
                         }
-                        if choice_width(ui, "Overlay", self.view == View::Overlay, 70.)
-                            .on_hover_text("One picture: B shows the bitmap, V the vector")
+                        if icon_button(ui, icon::CLOSE, idle && has_image)
+                            .on_hover_text(format!(
+                                "Close the image  ({})",
+                                ctx.format_shortcut(&SC_CLOSE)
+                            ))
                             .clicked()
                         {
-                            self.view = View::Overlay;
+                            actions.close = true;
+                        }
+                        if !narrow {
+                            if history_button(ui, false, idle && !self.undo.is_empty())
+                                .on_hover_text(format!("Undo  ({})", ctx.format_shortcut(&SC_UNDO)))
+                                .on_disabled_hover_text("Nothing to undo")
+                                .clicked()
+                            {
+                                actions.undo = true;
+                            }
+                            if history_button(ui, true, idle && !self.redo.is_empty())
+                                .on_hover_text(format!("Redo  ({})", ctx.format_shortcut(&SC_REDO)))
+                                .on_disabled_hover_text("Nothing to redo")
+                                .clicked()
+                            {
+                                actions.redo = true;
+                            }
+                            ui.add_space(6.);
+                            if choice_width(ui, "Side by side", self.view == View::SideBySide, 96.)
+                                .on_hover_text("The original and the vector side by side")
+                                .clicked()
+                            {
+                                self.view = View::SideBySide;
+                            }
+                            if choice_width(ui, "Overlay", self.view == View::Overlay, 70.)
+                                .on_hover_text("One view: B shows the original, V the vector")
+                                .clicked()
+                            {
+                                self.view = View::Overlay;
+                            }
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -208,15 +243,20 @@ impl Desktop {
         } else {
             format!("{}  Convert", icon::CONVERT)
         };
-        let convert = if can_convert {
-            egui::Button::new(RichText::new(text).color(pal().on_accent).strong())
-                .fill(pal().accent)
-                .stroke(Stroke::new(1_f32, pal().accent))
-                .corner_radius(CornerRadius::same(16))
-        } else {
-            egui::Button::new(RichText::new(text).color(pal().text))
-                .corner_radius(CornerRadius::same(16))
-        };
+        // Lit while there is something to convert: no vector yet, or
+        // settings the shown one was not made with. Once it is current the
+        // accent moves to Save, and Convert stays a plain button.
+        let wanted = can_convert && (self.document.is_none() || self.conversion_stale());
+        let lit = ctx.animate_bool_with_time(egui::Id::new("convert-lit"), wanted, 0.15);
+        let p = pal();
+        let convert = egui::Button::new(
+            RichText::new(text)
+                .color(p.text.lerp_to_gamma(p.on_accent, lit))
+                .strong(),
+        )
+        .fill(p.chip.lerp_to_gamma(p.accent, lit))
+        .stroke(Stroke::new(1_f32, p.edge.lerp_to_gamma(p.accent, lit)))
+        .corner_radius(CornerRadius::same(16));
         let width = if compact { 36. } else { 112. };
         ui.add_enabled(can_convert, convert.min_size(Vec2::new(width, 32.)))
             .on_hover_text(format!(
@@ -239,8 +279,6 @@ impl Desktop {
         if !narrow {
             // The sheet is a phone's; a wider window has the rail itself.
             self.rail_open = false;
-        } else if !self.rail_open {
-            return;
         }
         let panel = egui::SidePanel::left("controls")
             .frame(egui::Frame::new().inner_margin(Margin {
@@ -258,27 +296,48 @@ impl Desktop {
                 250.0..=400.
             })
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show_animated(ctx, !narrow || self.rail_open, |ui| {
                 egui::TopBottomPanel::bottom("rail-hints")
                     .frame(egui::Frame::new().inner_margin(Margin {
                         left: 4,
                         right: 0,
                         top: 6,
-                        bottom: 2,
+                        // Level with the status bar's text beside it.
+                        bottom: 12,
                     }))
                     .show_separator_line(false)
                     .show_inside(ui, |ui| {
-                        shortcuts(
-                            ui,
-                            &[
-                                (ctx.format_shortcut(&SC_OPEN), "Open"),
-                                (ctx.format_shortcut(&SC_CONVERT), "Convert"),
-                                (ctx.format_shortcut(&SC_SAVE), "Save"),
-                                ("Ctrl+Scroll".to_owned(), "Zoom"),
-                                (ctx.format_shortcut(&SC_UNDO), "Undo"),
-                                (ctx.format_shortcut(&SC_REDO), "Redo"),
-                            ],
-                        );
+                        ui.horizontal(|ui| {
+                            shortcuts(
+                                ui,
+                                &[
+                                    (ctx.format_shortcut(&SC_OPEN), "Open"),
+                                    (ctx.format_shortcut(&SC_CONVERT), "Convert"),
+                                    (ctx.format_shortcut(&SC_SAVE), "Save"),
+                                    ("Ctrl+Scroll".to_owned(), "Zoom"),
+                                    (ctx.format_shortcut(&SC_UNDO), "Undo"),
+                                    (ctx.format_shortcut(&SC_REDO), "Redo"),
+                                ],
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(8.);
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
+                                                .size(11.)
+                                                .color(pal().faint),
+                                        )
+                                        .selectable(false),
+                                    )
+                                    .on_hover_text(concat!(
+                                        "VectorMagik ",
+                                        env!("CARGO_PKG_VERSION")
+                                    ));
+                                },
+                            );
+                        });
                     });
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
@@ -312,7 +371,7 @@ impl Desktop {
                         );
                     });
             });
-        if !narrow {
+        if let (Some(panel), false) = (panel, narrow) {
             rail_grip(ctx, panel.response.rect);
         }
     }
@@ -454,11 +513,7 @@ impl Desktop {
             |ui| {
                 ui.add_enabled_ui(idle, |ui| {
                     let switched = toggle_row(ui, &mut self.advanced_on, "Use the sliders", None)
-                        .on_hover_text(
-                            "The original program's advanced mode: its three sliders replace the \
-                     image type's preset (the type still decides anti-aliasing and photo \
-                     seams). Starts from the settings the picture would get anyway.",
-                        )
+                        .on_hover_text("The original program's three sliders instead of the image type's preset")
                         .changed();
                     if switched && self.advanced_on {
                         self.seed_sliders();
@@ -509,13 +564,15 @@ impl Desktop {
                              smoothing phase and rounds every join.",
                             );
                     });
-                    if self.advanced_stale() && !self.conversion_stale() && self.worker.is_none() {
+                    let stale =
+                        self.advanced_stale() && !self.conversion_stale() && self.worker.is_none();
+                    reveal(ui, "advanced-stale", stale, |ui| {
                         ui.label(
                             RichText::new(self.stale_hint())
                                 .size(11.5)
                                 .color(pal().warn),
                         );
-                    }
+                    });
                 });
             },
         );
@@ -552,12 +609,7 @@ impl Desktop {
             !on,
             |ui| {
                 let mut changed = toggle_row(ui, &mut self.sticker_on, "Cut a sticker", None)
-                    .on_hover_text(
-                        "Paints a border around the outside of everything in the vector, with a \
-                 rim outside it like a die-cut sticker, and grows the picture so the \
-                 outline fits. The shapes themselves do not change; the outline is \
-                 saved with them.",
-                    )
+                    .on_hover_text("A die-cut outline around the whole picture")
                     .changed();
                 let mut cut = false;
                 let shown = self.sticker_on;
@@ -678,7 +730,7 @@ impl Desktop {
         let mut open = !self.collapsed[0];
         let summary = match (self.automatic, self.detected) {
             (true, Some(d)) => format!(
-                "Auto \u{00B7} {} \u{00B7} {:?}",
+                "Auto \u{00B7} {} \u{00B7} {:?} quality",
                 crate::auto::category_name(d.category),
                 d.quality
             ),
@@ -699,13 +751,15 @@ impl Desktop {
             false,
             |ui| {
                 ui.add_enabled_ui(idle, |ui| {
-                    toggle_row(ui, &mut self.automatic, "Auto settings", None).on_hover_text(
-                        "Estimated locally from colors, edges and resolution. Turn off to \
-                     choose the image type and source quality.",
-                    );
+                    toggle_row(ui, &mut self.automatic, "Auto settings", None)
+                        .on_hover_text("Picks the image type and quality for you");
                     ui.add_space(4.);
-                    if self.automatic {
-                        // What Auto found, once there is a picture to look at.
+                    // What Auto found, once there is a picture to look at;
+                    // with Auto off, the two choices it makes. Each slides in
+                    // and out as the switch flips.
+                    let found = self.automatic && self.detected.is_some();
+                    // The kinds, as the Image type list names them.
+                    reveal(ui, "auto-found", found, |ui| {
                         if let Some(d) = self.detected {
                             let text = format!(
                                 "{} \u{00B7} {:?} quality",
@@ -716,9 +770,15 @@ impl Desktop {
                                 ui.label(RichText::new(text).size(12.5).color(pal().dim));
                             });
                         }
-                    } else {
-                        ui.label(RichText::new("Image type").size(12.).color(pal().dim));
+                    });
+                    reveal(ui, "manual-settings", !self.automatic, |ui| {
+                        ui.label(RichText::new("Image type").size(12.).color(pal().dim))
+                            .on_hover_text(
+                                "Artwork: smooth edges, as most logos and drawings. Pixel art: \
+                                 hard pixel edges, no blending. Photo: photographs.",
+                            );
                         egui::ComboBox::from_id_salt("category")
+                            .icon(combo_mark)
                             .width(ui.available_width())
                             .selected_text(crate::auto::category_name(self.options.category))
                             .show_ui(ui, |ui| {
@@ -737,6 +797,7 @@ impl Desktop {
                         ui.add_space(4.);
                         ui.label(RichText::new("Source quality").size(12.).color(pal().dim));
                         egui::ComboBox::from_id_salt("quality")
+                            .icon(combo_mark)
                             .width(ui.available_width())
                             .selected_text(format!("{:?}", self.options.quality))
                             .show_ui(ui, |ui| {
@@ -748,8 +809,9 @@ impl Desktop {
                                     );
                                 }
                             });
-                    }
-                    if self.effective_category() == Some(ImageCategory::Photograph) {
+                    });
+                    let photo = self.effective_category() == Some(ImageCategory::Photograph);
+                    reveal(ui, "photo-seams", photo, |ui| {
                         ui.add_space(4.);
                         toggle_row(
                             ui,
@@ -757,11 +819,8 @@ impl Desktop {
                             "Reduce export seams",
                             None,
                         )
-                        .on_hover_text(
-                            "Opaque photographs only: a half-pixel same-color overlap hides \
-                         renderer seams between fills.",
-                        );
-                    }
+                        .on_hover_text("Hides hairline gaps between colors in some viewers");
+                    });
                     ui.add_space(6.);
                     labelled_row(ui, "Colors", |ui| {
                         let shown = match self.prep.colors {
@@ -769,6 +828,7 @@ impl Desktop {
                             Some(n) => n.to_string(),
                         };
                         egui::ComboBox::from_id_salt("colors")
+                            .icon(combo_mark)
                             .width(72.)
                             .selected_text(shown)
                             .show_ui(ui, |ui| {
@@ -788,51 +848,54 @@ impl Desktop {
                                  color the engine finds.",
                             );
                     });
-                    ui.add_space(2.);
-                    labelled_row(ui, "Background", |ui| {
-                        ui.add_enabled_ui(self.has_alpha, |ui| {
-                            ui.spacing_mut().item_spacing.x = 6.;
-                            let custom = self
-                                .prep
-                                .background
-                                .is_some_and(|c| c != [255, 255, 255] && c != [0, 0, 0]);
-                            if custom {
-                                let mut rgb = self.background_custom;
-                                if ui.color_edit_button_srgb(&mut rgb).changed() {
-                                    self.background_custom = rgb;
-                                    self.prep.background = Some(rgb);
-                                }
-                            }
-                            let shown = match self.prep.background {
-                                None => "Keep",
-                                Some([255, 255, 255]) => "White",
-                                Some([0, 0, 0]) => "Black",
-                                Some(_) => "Custom",
-                            };
-                            let mut choice = shown;
-                            egui::ComboBox::from_id_salt("background")
-                                .width(72.)
-                                .selected_text(shown)
-                                .show_ui(ui, |ui| {
-                                    for option in ["Keep", "White", "Black", "Custom"] {
-                                        ui.selectable_value(&mut choice, option, option);
+                    reveal(ui, "background", self.has_alpha, |ui| {
+                        ui.add_space(2.);
+                        labelled_row(ui, "Background", |ui| {
+                            ui.add_enabled_ui(self.has_alpha, |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.;
+                                let custom = self
+                                    .prep
+                                    .background
+                                    .is_some_and(|c| c != [255, 255, 255] && c != [0, 0, 0]);
+                                if custom {
+                                    let mut rgb = self.background_custom;
+                                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                                        self.background_custom = rgb;
+                                        self.prep.background = Some(rgb);
                                     }
-                                })
-                                .response
-                                .on_hover_text(
-                                    "Keep leaves the transparent parts transparent. White, \
+                                }
+                                let shown = match self.prep.background {
+                                    None => "Keep",
+                                    Some([255, 255, 255]) => "White",
+                                    Some([0, 0, 0]) => "Black",
+                                    Some(_) => "Custom",
+                                };
+                                let mut choice = shown;
+                                egui::ComboBox::from_id_salt("background")
+                                    .icon(combo_mark)
+                                    .width(72.)
+                                    .selected_text(shown)
+                                    .show_ui(ui, |ui| {
+                                        for option in ["Keep", "White", "Black", "Custom"] {
+                                            ui.selectable_value(&mut choice, option, option);
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(
+                                        "Keep leaves the transparent parts transparent. White, \
                                      Black or a custom color flatten the image onto that \
                                      color first, so the vector gets a background shape.",
-                                )
-                                .on_disabled_hover_text("The source has no transparency.");
-                            if choice != shown {
-                                self.prep.background = match choice {
-                                    "White" => Some([255, 255, 255]),
-                                    "Black" => Some([0, 0, 0]),
-                                    "Custom" => Some(self.background_custom),
-                                    _ => None,
-                                };
-                            }
+                                    )
+                                    .on_disabled_hover_text("The source has no transparency.");
+                                if choice != shown {
+                                    self.prep.background = match choice {
+                                        "White" => Some([255, 255, 255]),
+                                        "Black" => Some([0, 0, 0]),
+                                        "Custom" => Some(self.background_custom),
+                                        _ => None,
+                                    };
+                                }
+                            });
                         });
                     });
                 });
@@ -849,27 +912,26 @@ impl Desktop {
                              less accuracy (one extra fitting step). The original program \
                              shipped with it off; off is the original result.",
                         );
-                        if let Some(note) = self.raw_document.as_deref().and_then(optimizer_note) {
-                            ui.label(RichText::new(note).size(11.5).color(pal().dim));
-                        }
+                        let note = self.raw_document.as_deref().and_then(optimizer_note);
+                        reveal(ui, "optimizer-note", note.is_some(), |ui| {
+                            if let Some(note) = note {
+                                ui.label(RichText::new(note).size(11.5).color(pal().dim));
+                            }
+                        });
                     });
                     // Not greyed while a conversion runs: switching it off is
                     // how to stop the next one starting by itself.
                     toggle_row(ui, &mut self.auto_convert, "Convert automatically", None)
-                        .on_hover_text(
-                            "Once the image has been converted, changing a setting converts \
-                             it again by itself, a moment after the last change; a \
-                             conversion still running with the old settings is stopped. \
-                             Opening your own image never converts it by itself.",
-                        );
+                        .on_hover_text("Converts again a moment after you change a setting");
                 });
-                if self.conversion_stale() && self.worker.is_none() {
+                let stale = self.conversion_stale() && self.worker.is_none();
+                reveal(ui, "conversion-stale", stale, |ui| {
                     ui.label(
                         RichText::new(self.stale_hint())
                             .size(11.5)
                             .color(pal().warn),
                     );
-                }
+                });
             },
         );
         self.collapsed[0] = !open;
@@ -910,18 +972,14 @@ impl Desktop {
             false,
             |ui| {
                 let toggled = toggle_row(ui, &mut self.simplify, "Simplify curves", None)
-                    .on_hover_text(
-                        "Merges neighboring curve pieces wherever one curve stays within the \
-                     tolerance of the engine's fit. Edges shared by two fills stay sealed; \
-                     corners and junctions are kept. Off shows the engine's exact output.",
-                    )
+                    .on_hover_text("Fewer nodes, the same look")
                     .changed();
                 let mut moved = false;
                 let mut auto = false;
                 let simplify = self.simplify;
                 reveal(ui, "simplify-tolerance", simplify, |ui| {
                     ui.add_space(2.);
-                    labelled_row(ui, "Tolerance", |ui| {
+                    labelled_row(ui, "Amount", |ui| {
                         ui.spacing_mut().item_spacing.x = 8.;
                         ui.label(
                             RichText::new(format!("{:.2} px", self.simplify_tolerance))
@@ -978,11 +1036,7 @@ impl Desktop {
                     regular_toggled =
                         toggle_row(ui, &mut self.regularize, "True lines and circles", None)
                             .on_hover_text(
-                                "A run of pieces that all lie within 0.8 source pixels of one \
-                     straight line is drawn as that line, and a run on one circle as \
-                     circle arcs (a full ring becomes a four-piece circle), so traced \
-                     edges stop wobbling. Shared edges stay sealed; nodes where three \
-                     fills meet never move.",
+                                "Draws nearly straight lines straight and nearly round arcs round",
                             )
                             .changed();
                     // Photographs are left as traced: the switch would do nothing.
@@ -1021,7 +1075,7 @@ impl Desktop {
                         egui::Sides::new().show(
                             ui,
                             |ui| {
-                                ui.label(RichText::new("Bow").size(12.5).color(pal().dim));
+                                ui.label(RichText::new("Amount").size(12.5).color(pal().dim));
                             },
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 8.;
@@ -1068,7 +1122,7 @@ impl Desktop {
                 ui.add_space(2.);
                 let counts = match (self.node_counts, self.simplify) {
                     (Some((before, after)), true) if after != before => {
-                        format!("{before} \u{2192} {after} nodes")
+                        format!("{before} \u{2192} {after} nodes after simplifying")
                     }
                     (Some((before, _)), _) => format!("{before} nodes"),
                     (None, _) => String::new(),
@@ -1185,7 +1239,8 @@ impl Desktop {
                         egui::Button::new(RichText::new(text).size(12.))
                             .corner_radius(CornerRadius::same(10))
                     };
-                    if rounded > 1 || squared > 0 || moved > 0 || deleted > 0 {
+                    let any = rounded > 1 || squared > 0 || moved > 0 || deleted > 0;
+                    reveal(ui, "node-restore", any, |ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
                             if rounded > 1 && ui.add(button("Restore all corners")).clicked() {
@@ -1221,7 +1276,7 @@ impl Desktop {
                                 self.restore_deleted_nodes();
                             }
                         });
-                    }
+                    });
                 });
             },
         );
@@ -1291,16 +1346,10 @@ impl Desktop {
                 }
                 let mut delete = false;
                 let mut merge = false;
-                if self.shapes_mode {
+                reveal(ui, "shapes-selecting", self.shapes_mode, |ui| {
                     ui.add_space(2.);
-                    changed |= ui
-                        .checkbox(
-                            &mut self.delete_on_click,
-                            RichText::new("Delete on click").size(12.5),
-                        )
-                        .on_hover_text(
-                            "Clicking a shape removes it at once instead of selecting it.",
-                        )
+                    changed |= toggle_row(ui, &mut self.delete_on_click, "Delete on click", None)
+                        .on_hover_text("A click removes the shape at once instead of selecting it.")
                         .changed();
                     let resolved = self.resolve_selection();
                     if !resolved.is_empty() {
@@ -1345,7 +1394,7 @@ impl Desktop {
                             }
                         });
                     }
-                }
+                });
                 if changed {
                     self.selected.clear();
                     self.shape_menu = None;
@@ -1365,7 +1414,7 @@ impl Desktop {
                 }
                 let mut undelete = false;
                 let mut unmerge = false;
-                if removed > 0 || merges > 0 {
+                reveal(ui, "shapes-undo", removed > 0 || merges > 0, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.;
                         if removed > 0
@@ -1392,7 +1441,7 @@ impl Desktop {
                             unmerge = true;
                         }
                     });
-                }
+                });
                 if delete {
                     self.delete_selected();
                 }

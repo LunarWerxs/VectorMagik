@@ -6,6 +6,27 @@ impl Desktop {
     /// The footer: the status on the left; on the right the result stats
     /// (each one clickable) and the zoom controls.
     pub(super) fn status_bar(&mut self, ctx: &egui::Context) {
+        // Before a picture the welcome card says what to do and shows an
+        // opening in progress: the bar slides in with the picture, or with
+        // news (a refusal, a licence activated) the card does not carry.
+        let shown = self.raster.is_some()
+            || self.foreign.is_some()
+            || !matches!(self.status_kind, StatusKind::Info | StatusKind::Busy);
+        // A new message eases in rather than replacing the last in a frame.
+        let now = ctx.input(|i| i.time);
+        let since = ctx.data_mut(|d| {
+            let seen = d.get_temp_mut_or_insert_with(egui::Id::new("status-since"), || {
+                (self.status.clone(), now)
+            });
+            if seen.0 != self.status {
+                *seen = (self.status.clone(), now);
+            }
+            seen.1
+        });
+        let fresh = ((now - since) / 0.12).clamp(0., 1.) as f32;
+        if fresh < 1. {
+            ctx.request_repaint();
+        }
         let (node_counts, palette) = self.shown_counts();
         let stats = node_counts.map(|(_, nodes)| (nodes, palette));
         // The picture opened, also when the engine traced a scaled copy.
@@ -20,15 +41,26 @@ impl Desktop {
         let mut zoom_to: Option<f32> = None;
         let mut fit = false;
         egui::TopBottomPanel::bottom("status")
-            .frame(bar_frame(6, false))
+            // Its left edge lines up with the picture cards above it (the
+            // workspace keeps 6 px beside the rail, 12 without one).
+            .frame(bar_frame(6, false).outer_margin(Margin {
+                left: if narrow_window(ctx) { 12 } else { 6 },
+                right: 12,
+                top: 4,
+                bottom: 10,
+            }))
             .show_separator_line(false)
-            .show(ctx, |ui| {
+            .show_animated(ctx, shown, |ui| {
                 let width = ui.available_width();
                 let (show_detail, show_size) = (width >= 820., width >= 600.);
                 egui::Sides::new().spacing(16.).shrink_left().show(
                     ui,
                     |ui| {
                         ui.spacing_mut().item_spacing.x = 8.;
+                        ui.multiply_opacity(fresh);
+                        if self.status.is_empty() {
+                            return;
+                        }
                         let (color, text_color) = match self.status_kind {
                             StatusKind::Info => (pal().dim, pal().text),
                             StatusKind::Busy => (pal().accent, pal().text),
@@ -75,17 +107,10 @@ impl Desktop {
                             zoom_to = Some(self.zoom * ZOOM_STEP);
                         }
                         if ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::new(format!(
-                                        "{:.0}%",
-                                        self.fit * self.zoom * 100.
-                                    ))
-                                    .size(12.)
-                                    .color(pal().dim),
-                                )
-                                .sense(egui::Sense::click()),
-                            )
+                            .add(small_button_widget(&format!(
+                                "{:.0}%",
+                                self.fit * self.zoom * 100.
+                            )))
                             .on_hover_text(
                                 "Click for one source pixel per screen pixel  (1). \
                                  Ctrl+scroll over a picture zooms around the pointer.",
@@ -403,6 +428,12 @@ impl Desktop {
                     }
                 }
             });
+            ui.add_space(6.);
+            ui.label(
+                RichText::new(concat!("VectorMagik ", env!("CARGO_PKG_VERSION")))
+                    .size(11.)
+                    .color(pal().faint),
+            );
         });
         self.appearance_open = open;
     }
@@ -495,7 +526,7 @@ impl Desktop {
                  none (the original's stroking mode).",
                     );
             });
-            if self.save_format == Format::Dxf {
+            reveal(ui, "dxf-curves", self.save_format == Format::Dxf, |ui| {
                 labelled_row(ui, "DXF curves", |ui| {
                     ui.spacing_mut().item_spacing.x = 4.;
                     use crate::export::DxfMode;
@@ -524,7 +555,7 @@ impl Desktop {
                         }
                     }
                 });
-            }
+            });
             ui.add_space(4.);
             let name = self.export_name();
             let (rect, response) = ui.allocate_exact_size(
@@ -598,17 +629,42 @@ impl Desktop {
             if response.drag_started() || (platform::IN_BROWSER && response.clicked()) {
                 drag = true;
             }
-            if !platform::IN_BROWSER
-                && ui
-                    .add(
-                        egui::Button::new(RichText::new("Choose a location\u{2026}").size(13.))
-                            .min_size(Vec2::new(ui.available_width(), 30.))
-                            .corner_radius(CornerRadius::same(10)),
+            ui.add_space(2.);
+            let label = if platform::IN_BROWSER {
+                format!("Download {}", self.save_format.label())
+            } else {
+                "Save\u{2026}".to_owned()
+            };
+            // Sized rather than stretched, so the label sits in the middle.
+            let width = ui.available_width();
+            if ui
+                .add_enabled_ui(ready || !platform::IN_BROWSER, |ui| {
+                    ui.add_sized(
+                        [width, 32.],
+                        egui::Button::new(
+                            RichText::new(label)
+                                .size(13.)
+                                .color(pal().on_accent)
+                                .strong(),
+                        )
+                        .fill(pal().accent)
+                        .stroke(Stroke::new(1_f32, pal().accent))
+                        .corner_radius(CornerRadius::same(10)),
                     )
-                    .on_hover_text("The system save dialog, set to this format.")
-                    .clicked()
+                })
+                .inner
+                .on_hover_text(if platform::IN_BROWSER {
+                    "Save the file to your downloads"
+                } else {
+                    "Choose where to save it"
+                })
+                .clicked()
             {
-                choose = true;
+                if platform::IN_BROWSER {
+                    drag = true;
+                } else {
+                    choose = true;
+                }
             }
         });
         self.save_open = open;

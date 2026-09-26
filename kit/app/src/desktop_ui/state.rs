@@ -198,7 +198,7 @@ impl Desktop {
             replaced: None,
             errand: None,
             staged: None,
-            status: "Open or drop an image to begin.".into(),
+            status: String::new(),
             status_kind: StatusKind::Info,
             started: Stopwatch::start(),
             elapsed: None,
@@ -1001,7 +1001,8 @@ impl Desktop {
         self.zoom = 1.;
         self.fit = 1.;
         self.scroll = Vec2::ZERO;
-        self.set_status(StatusKind::Info, "Open or drop an image to begin.");
+        // The welcome card says what to do; the bar has nothing to add.
+        self.set_status(StatusKind::Info, "");
     }
     /// Open the picture at `path`. A file that cannot be opened leaves the
     /// picture already open as it was, with its result, edits and Undo (the
@@ -1281,7 +1282,7 @@ impl Desktop {
             })
         });
         self.clear_result();
-        self.set_status(StatusKind::Busy, "Creating vector curves\u{2026}");
+        self.set_status(StatusKind::Busy, "Converting\u{2026}");
         let stop = Arc::new(AtomicBool::new(false));
         self.stop = stop.clone();
         platform::spawn(move || {
@@ -1481,13 +1482,11 @@ impl Desktop {
     pub(super) fn open_dialog(&mut self) {
         if platform::IN_BROWSER {
             platform::ask(platform::Command::OpenPicker);
-            self.set_status(StatusKind::Info, "Choose an image in the file chooser.");
             return;
         }
         self.send_errand(ErrandKind::Open, || {
             Fetched::Picked(file_dialog(false, "", Format::Svg))
         });
-        self.set_status(StatusKind::Info, "Choose an image in the Open dialog.");
     }
     /// The system dialog, filtered to the chosen format; the format picked in
     /// the dialog wins if the user changes it there.
@@ -1500,7 +1499,6 @@ impl Desktop {
         self.send_errand(ErrandKind::Save, move || {
             Fetched::Picked(file_dialog(true, &stem, format))
         });
-        self.set_status(StatusKind::Info, "Choose where to save in the Save dialog.");
     }
     pub(super) fn save_preview_png(&mut self) {
         if platform::IN_BROWSER {
@@ -1860,7 +1858,7 @@ impl Desktop {
                     Some((w, h)) => format!(" at {w} \u{00D7} {h} px"),
                     None => String::new(),
                 };
-                self.set_status(StatusKind::Done, format!("Dropped {name}{size}."));
+                self.set_status(StatusKind::Done, format!("Saved {name}{size}."));
             }
             Ok(crate::dragout::DragOutcome::Cancelled) => {}
             Err(error) => self.set_status(StatusKind::Error, error),

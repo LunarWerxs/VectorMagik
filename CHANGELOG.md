@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.5.1 (September 26, 2026)
+
+- Before a picture: one compact welcome card (drop, click, Browse for an image or Try a
+  sample) instead of two full-height cards; the toolbar says Pick an image and hides what
+  has nothing to act on.
+- Controls answer: the picture box lights up and dips when clicked; card headings and More
+  options (now a disclosure row) highlight under the pointer; switches ease their colour;
+  the empty Vector card offers Convert and shows a conversion's progress.
+- Rows slide in and out instead of popping: Auto settings off, the photo and background
+  options, the Shapes card's tools, DXF curves, the licence key and the phone's settings
+  sheet.
+- Convert is lit while there is something to convert, then Save; a Save or Download button
+  in the Save panel; Undo and Redo buttons.
+- Plainer words: Artwork, Pixel art, Photo; Amount; "Click to hide"; one-line tooltips; the
+  version in the settings' footer and in Appearance.
+
 ## 0.5.0 (September 26, 2026)
 
 - For AI assistants: `vector-magic-rebuild --mcp` is an MCP server, so Claude, Cursor and

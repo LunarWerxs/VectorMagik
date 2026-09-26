@@ -16,6 +16,17 @@ impl Desktop {
                 bottom: 12,
             }))
             .show(ctx, |ui| {
+                // Before a picture: one compact welcome card, not two cards
+                // the height of the window (the owner, September 26, 2026:
+                // "the large drop box ... might be too big").
+                if self.raster.is_none() {
+                    match self.welcome(ui) {
+                        Start::Browse => self.open_dialog(),
+                        Start::Sample => self.open_sample(ui.ctx()),
+                        Start::Nothing => {}
+                    }
+                    return;
+                }
                 let avail = ui.available_size();
                 let aspect = self
                     .raster
@@ -94,11 +105,11 @@ impl Desktop {
                             if overlay {
                                 ui.add_space(6.);
                                 let hold = self.hold_compare;
-                                let bitmap = choice_width(ui, "B  Bitmap", !vector, 76.)
+                                let bitmap = choice_width(ui, "B  Original", !vector, 84.)
                                     .on_hover_text(if hold {
-                                        "Hold to see the source image  (hold B)"
+                                        "Hold to see the original  (hold B)"
                                     } else {
-                                        "Show the source image  (B)"
+                                        "Show the original  (B)"
                                     });
                                 let vector_button = ui
                                     .add_enabled(
@@ -228,8 +239,8 @@ impl Desktop {
             self.source.clone()
         };
         let (Some(texture), Some(raster)) = (texture, self.raster.as_ref()) else {
-            if self.empty_state(ui, vector) {
-                self.open_sample(ui.ctx());
+            if self.empty_state(ui, vector) && self.idle() && self.path == self.loaded_path {
+                self.start();
             }
             return;
         };
@@ -844,44 +855,147 @@ impl Desktop {
         response.on_hover_text("Overview. Click or drag to move the view.");
     }
 
-    /// What an empty card says; on the source card before any picture, a
-    /// "Try a sample" button, and whether it was clicked.
+    /// What a picture card says with nothing to show yet: on the vector
+    /// card a conversion running, with its time, or a Convert button; true
+    /// when that was clicked.
     pub(super) fn empty_state(&self, ui: &mut egui::Ui, vector: bool) -> bool {
         let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
         let painter = ui.painter_at(rect);
-        let inner = rect
-            .shrink2(Vec2::new(14., 6.))
-            .translate(Vec2::new(0., -4.));
-        let dropping = !vector && self.idle() && Self::files_hovering(ui.ctx());
-        let (glyph, title, hint) = match (vector, self.raster.is_some(), dropping) {
-            (false, _, true) => (icon::OPEN, "Drop to open", ""),
-            // One line each: what to do, not the list of formats (the Open
-            // dialog filters by them).
-            (false, _, false) => (
-                icon::OPEN,
-                "Drop an image here",
-                "A logo, a drawing or a photo, or click Open above",
-            ),
-            (true, true, _) => (icon::CONVERT, "Ready to convert", ""),
-            (true, false, _) => (icon::VECTOR, "The vector appears here", ""),
+        let center = rect.center() - Vec2::new(0., 12.);
+        let converting = vector && self.worker.is_some();
+        let (title, hint) = if converting {
+            ui.ctx().request_repaint();
+            (
+                "Converting\u{2026}".to_owned(),
+                format!("{:.1} s", self.started.elapsed().as_secs_f64()),
+            )
+        } else if vector && self.raster.is_some() {
+            ("Ready to convert".to_owned(), String::new())
+        } else if vector {
+            ("The vector appears here".to_owned(), String::new())
+        } else {
+            ("No picture".to_owned(), String::new())
         };
-        if !vector {
-            if dropping {
-                painter.rect_filled(inner, 10., faded(pal().accent, 0.09));
-            }
-            dashed_rect(
-                &painter,
-                inner,
-                Stroke::new(1.5_f32, if dropping { pal().accent } else { pal().faint }),
+        if converting {
+            ui.put(
+                egui::Rect::from_center_size(center - Vec2::new(0., 26.), Vec2::splat(32.)),
+                egui::Spinner::new().size(28.).color(pal().accent),
+            );
+        } else {
+            painter.text(
+                center - Vec2::new(0., 26.),
+                Align2::CENTER_CENTER,
+                if vector { icon::VECTOR } else { icon::OPEN },
+                FontId::proportional(40.),
+                pal().faint,
             );
         }
-        let center = inner.center();
+        painter.text(
+            center + Vec2::new(0., 18.),
+            Align2::CENTER_CENTER,
+            title,
+            FontId::new(16., self.title_family.clone()),
+            pal().text,
+        );
+        painter.text(
+            center + Vec2::new(0., 40.),
+            Align2::CENTER_CENTER,
+            hint,
+            FontId::proportional(12.5),
+            pal().dim,
+        );
+        let can_convert = vector
+            && self.raster.is_some()
+            && self.idle()
+            && self.document.is_none()
+            && self.path == self.loaded_path;
+        if !can_convert {
+            return false;
+        }
+        ui.put(
+            egui::Rect::from_center_size(center + Vec2::new(0., 62.), Vec2::new(132., 34.)),
+            egui::Button::new(
+                RichText::new(format!("{}  Convert", icon::CONVERT))
+                    .color(pal().on_accent)
+                    .strong(),
+            )
+            .fill(pal().accent)
+            .stroke(Stroke::new(1_f32, pal().accent))
+            .corner_radius(CornerRadius::same(17)),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    }
+
+    /// The welcome card before any picture: compact and a little above the
+    /// middle, the whole card a drop target, with Browse and Try a sample;
+    /// while a picture opens it says so instead. What was asked for.
+    pub(super) fn welcome(&self, ui: &mut egui::Ui) -> Start {
+        let area = ui.available_rect_before_wrap();
+        let size = Vec2::new(area.width().min(540.), area.height().min(330.));
+        let rect = egui::Rect::from_center_size(
+            area.center() - Vec2::new(0., (area.height() - size.y) * 0.12),
+            size,
+        );
+        let mut start = Start::Nothing;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            card_frame().show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
+                start = self.drop_zone(ui);
+            });
+        });
+        start
+    }
+
+    fn drop_zone(&self, ui: &mut egui::Ui) -> Start {
+        let idle = self.idle();
+        let (rect, zone) = ui.allocate_exact_size(
+            ui.available_size(),
+            if idle {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        );
+        let painter = ui.painter_at(rect);
+        let dropping = idle && Self::files_hovering(ui.ctx());
+        // The target eases in as a file comes over the window or the
+        // pointer over the card, and dips while pressed.
+        let ctx = ui.ctx().clone();
+        let lit = ctx.animate_bool_with_time(zone.id.with("lit"), dropping, 0.15);
+        let near = ctx.animate_bool_with_time(zone.id.with("near"), idle && zone.hovered(), 0.15);
+        let down = ctx.animate_bool_with_time(
+            zone.id.with("down"),
+            idle && zone.is_pointer_button_down_on(),
+            0.08,
+        );
+        let inner = rect.shrink(12. + 2. * down);
+        let glow = lit.max(near * 0.5);
+        if glow > 0. {
+            painter.rect_filled(inner, 12., faded(pal().accent, 0.09 * glow));
+        }
+        dashed_round_rect(
+            &painter,
+            inner,
+            12.,
+            Stroke::new(1.5_f32, pal().faint.lerp_to_gamma(pal().accent, glow)),
+        );
+        let center = inner.center() - Vec2::new(0., 22.);
+        let opening = !self.idle();
+        let (title, hint) = if dropping {
+            ("Drop to open", "")
+        } else if opening {
+            (self.status.as_str(), "")
+        } else {
+            // What to do, not the list of formats (the picker filters by them).
+            ("Drop an image here", "A logo, a drawing or a photo")
+        };
         painter.text(
             center - Vec2::new(0., 34.),
             Align2::CENTER_CENTER,
-            glyph,
+            icon::OPEN,
             FontId::proportional(44.),
-            if dropping { pal().accent } else { pal().faint },
+            pal().faint.lerp_to_gamma(pal().accent, glow),
         );
         painter.text(
             center + Vec2::new(0., 14.),
@@ -897,20 +1011,78 @@ impl Desktop {
             FontId::proportional(12.5),
             pal().dim,
         );
-        if vector || dropping || self.raster.is_some() || !self.idle() {
-            return false;
+        if opening {
+            ui.put(
+                egui::Rect::from_center_size(center + Vec2::new(0., 76.), Vec2::splat(22.)),
+                egui::Spinner::new().size(20.).color(pal().accent),
+            );
+            return Start::Nothing;
         }
-        let button =
-            egui::Rect::from_center_size(center + Vec2::new(0., 76.), Vec2::new(150., 32.));
-        ui.put(
-            button,
-            egui::Button::new(RichText::new("Try a sample").color(pal().on_accent))
+        if dropping {
+            return Start::Nothing;
+        }
+        // Browse first, the way most people arrive: with a picture of their
+        // own; the sample beside it for those without one.
+        let (browse_w, sample_w, gap) = (176., 132., 10.);
+        // Side by side, or one above the other on a card a phone narrows.
+        let stacked = inner.width() < browse_w + gap + sample_w + 48.;
+        let top = center.y + 60.;
+        let (browse_at, sample_at, sample_w) = if stacked {
+            (
+                egui::pos2(center.x - browse_w / 2., top),
+                egui::pos2(center.x - browse_w / 2., top + 34. + gap),
+                browse_w,
+            )
+        } else {
+            let left = center.x - (browse_w + gap + sample_w) / 2.;
+            (
+                egui::pos2(left, top),
+                egui::pos2(left + browse_w + gap, top),
+                sample_w,
+            )
+        };
+        let browse = ui
+            .put(
+                egui::Rect::from_min_size(browse_at, Vec2::new(browse_w, 34.)),
+                egui::Button::new(
+                    RichText::new(format!("{}  Browse for an image", icon::OPEN))
+                        .color(pal().on_accent),
+                )
                 .fill(pal().accent)
-                .corner_radius(CornerRadius::same(16)),
-        )
-        .on_hover_text("Open a sample logo and convert it")
-        .clicked()
+                .corner_radius(CornerRadius::same(17)),
+            )
+            .on_hover_text("Choose a picture on this computer")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let sample = ui
+            .put(
+                egui::Rect::from_min_size(sample_at, Vec2::new(sample_w, 34.)),
+                egui::Button::new(RichText::new("Try a sample").color(pal().text))
+                    .corner_radius(CornerRadius::same(17)),
+            )
+            .on_hover_text("Open a sample logo and convert it")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if browse.clicked() {
+            Start::Browse
+        } else if sample.clicked() {
+            Start::Sample
+        } else if zone
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Click to choose a picture, or drop one here")
+            .clicked()
+        {
+            Start::Browse
+        } else {
+            Start::Nothing
+        }
     }
+}
+
+/// What the welcome card's buttons asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Start {
+    Nothing,
+    Browse,
+    Sample,
 }
 
 /// A node's marker: a hollow circle for a rounded corner, a hollow square
