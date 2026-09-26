@@ -149,7 +149,9 @@ static DARK: Palette = Palette {
     text: rgb(246, 246, 250),
     label: rgb(236, 236, 242),
     dim: rgb(170, 170, 176),
-    faint: rgb(116, 116, 122),
+    // At least 4.5:1 on the near-black (116 gave 4.2, the design critic's
+    // low-contrast text).
+    faint: rgb(132, 132, 138),
     accent: rgb(10, 132, 255),
     accent_soft: rgba(10, 132, 255, 80),
     on_accent: rgb(255, 255, 255),
@@ -186,7 +188,8 @@ static LIGHT: Palette = Palette {
     text: rgb(28, 28, 32),
     label: rgb(28, 28, 32),
     dim: rgb(88, 88, 94),
-    faint: rgb(140, 140, 146),
+    // At least 4.5:1 on the frosted white (140 gave under 3).
+    faint: rgb(108, 108, 114),
     accent: rgb(0, 122, 255),
     accent_soft: rgba(0, 122, 255, 44),
     on_accent: rgb(255, 255, 255),
@@ -241,12 +244,9 @@ pub(super) fn palette(dark: bool) -> &'static Palette {
     }
 }
 
-/// Put the light or the dark palette in force; true when it changed.
-pub(super) fn set(dark: bool) -> bool {
-    let next = palette(dark);
-    let changed = !std::ptr::eq(pal(), next);
-    CURRENT.with(|current| current.set(next));
-    changed
+/// Put the light or the dark palette in force.
+pub(super) fn set(dark: bool) {
+    CURRENT.with(|current| current.set(palette(dark)));
 }
 
 /// `color` at `alpha` of its opacity.

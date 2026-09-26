@@ -98,7 +98,7 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   });
   if (!gl) {
     if (onError) onError('This browser has no WebGL2.');
-    return { stop() {} };
+    throw new Error('This browser has no WebGL2.');
   }
 
   // --- painter: one program, one VAO and the two buffers reused ------------
@@ -348,10 +348,13 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
     const newTab = view.getUint8(p); p += 1;
     // A new tab, unless a blocker refuses it (the frame runs just after the
     // click): then the page itself goes there rather than doing nothing.
-    if (url) {
-      const tab = newTab ? window.open(url, '_blank') : null;
-      if (tab) tab.opener = null;
-      else window.location.assign(url);
+    if (url && /^https:\/\//.test(url)) {
+      if (newTab) {
+        const tab = window.open(url, '_blank', 'noopener');
+        if (tab) tab.opener = null;
+      } else {
+        window.location.assign(url);
+      }
     }
 
     const nextSeconds = view.getFloat64(p, true); p += 8;
@@ -373,7 +376,7 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
         const text = str();
         try { localStorage.setItem('vectormagik.prefs', text); } catch { /* private mode */ }
         const theme = /^theme=(dark|light|system)/m.exec(text);
-        if (theme) pageTheme(theme[1]);
+        if (theme) followTheme(theme[1]);
         // The app's answer to "personal or commercial use?" is the site's
         // license choice too (its header badge, 'vm-license').
         const use = /^licence_use=(personal|commercial)/m.exec(text);
@@ -538,6 +541,7 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
     const key = event.key;
     if (event.shiftKey && (key === 'i' || key === 'I')) return false; // devtools
     if (key === 'F12' || key === 'F5') return false; // devtools, reload
+    if (key === 'Tab' && event.shiftKey) return false; // out of the canvas, to the page
     if (PREVENT_KEYS.has(key)) return true;
     if ((event.ctrlKey || event.metaKey) && !'cvxrCVXR'.includes(key)) return true;
     return false;
@@ -620,7 +624,18 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
     } catch { /* private mode */ }
   };
   const saved = /^theme=(dark|light|system)/m.exec(prefs);
-  if (saved) pageTheme(saved[1]);
+  let pageWord = saved ? saved[1] : '';
+  if (pageWord) pageTheme(pageWord);
+  const followTheme = (word) => {
+    if (word === pageWord) return;
+    pageWord = word;
+    pageTheme(word);
+  };
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+      if (pageWord === 'system') pageTheme('system');
+    });
+  }
 
   // What the page shows (data-theme on <html>) is what the app's System
   // follows; without one, the device's preference.

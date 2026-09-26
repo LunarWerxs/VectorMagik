@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.6 (September 26, 2026)
+
+- Try a sample: the empty window opens and converts a sample logo in one click.
+- Works on a phone: in a narrow window the settings open as a sheet from a gear in the
+  toolbar, and Convert shrinks to its icon.
+- Curve nodes stay hidden until you turn them on, and the app remembers. The license
+  question's free choice is the prominent one. The Save panel shows format and size; the
+  layering options sit under More options. The Advanced card says Off until used.
+- Hint text is brighter in both themes; Keyboard shortcuts opens with a click.
+- In the browser: Shift+Tab leaves the app, a browser without WebGL2 says so instead of
+  showing a blank page, and the page's light or dark follows the app's choice and the
+  device's.
+- Rounding many corners on a large picture no longer holds hundreds of megabytes.
+
 ## 0.4.5 (September 25, 2026)
 
 - One look: Glass, with the cards a little lighter than a flat near-black in the dark

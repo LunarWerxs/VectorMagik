@@ -228,7 +228,9 @@ impl Desktop {
             self.source.clone()
         };
         let (Some(texture), Some(raster)) = (texture, self.raster.as_ref()) else {
-            self.empty_state(ui, vector);
+            if self.empty_state(ui, vector) {
+                self.open_sample(ui.ctx());
+            }
             return;
         };
         // The vector grows by the sticker's margin on every side; both cards
@@ -842,7 +844,9 @@ impl Desktop {
         response.on_hover_text("Overview. Click or drag to move the view.");
     }
 
-    pub(super) fn empty_state(&self, ui: &mut egui::Ui, vector: bool) {
+    /// What an empty card says; on the source card before any picture, a
+    /// "Try a sample" button, and whether it was clicked.
+    pub(super) fn empty_state(&self, ui: &mut egui::Ui, vector: bool) -> bool {
         let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
         let painter = ui.painter_at(rect);
         let inner = rect
@@ -853,7 +857,11 @@ impl Desktop {
             (false, _, true) => (icon::OPEN, "Drop to open", ""),
             // One line each: what to do, not the list of formats (the Open
             // dialog filters by them).
-            (false, _, false) => (icon::OPEN, "Drop an image here", "or click Open above"),
+            (false, _, false) => (
+                icon::OPEN,
+                "Drop an image here",
+                "A logo, a drawing or a photo, or click Open above",
+            ),
             (true, true, _) => (icon::CONVERT, "Ready to convert", ""),
             (true, false, _) => (icon::VECTOR, "The vector appears here", ""),
         };
@@ -889,6 +897,19 @@ impl Desktop {
             FontId::proportional(12.5),
             pal().dim,
         );
+        if vector || dropping || self.raster.is_some() || !self.idle() {
+            return false;
+        }
+        let button =
+            egui::Rect::from_center_size(center + Vec2::new(0., 76.), Vec2::new(150., 32.));
+        ui.put(
+            button,
+            egui::Button::new(RichText::new("Try a sample").color(pal().on_accent))
+                .fill(pal().accent)
+                .corner_radius(CornerRadius::same(16)),
+        )
+        .on_hover_text("Open a sample logo and convert it")
+        .clicked()
     }
 }
 

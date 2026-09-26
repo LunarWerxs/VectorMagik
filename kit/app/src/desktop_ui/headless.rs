@@ -223,9 +223,6 @@ impl Desktop {
         if actions.open && idle {
             self.open_dialog();
         }
-        if actions.load && idle && !self.path.trim().is_empty() {
-            self.load(ctx);
-        }
         if actions.convert && idle && self.raster.is_some() && self.path == self.loaded_path {
             self.start();
         }

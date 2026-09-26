@@ -23,9 +23,9 @@ impl Desktop {
     /// kept from the last visit.
     pub fn in_browser(ctx: &egui::Context, prefs: &str) -> Self {
         let mut app = Self::blank(ctx);
-        (app.hold_compare, app.auto_convert) =
-            prefs::parse_prefs(prefs, (app.hold_compare, app.auto_convert));
-        app.prefs_saved = (app.hold_compare, app.auto_convert);
+        (app.hold_compare, app.auto_convert, app.nodes) =
+            prefs::parse_prefs(prefs, (app.hold_compare, app.auto_convert, app.nodes));
+        app.prefs_saved = (app.hold_compare, app.auto_convert, app.nodes);
         app.licence = prefs::parse_licence(prefs);
         app.licence_saved = app.licence.clone();
         (app.theme, app.licence_use) = prefs::parse_appearance(prefs);
@@ -121,9 +121,8 @@ impl Desktop {
             sticker: Sticker::default(),
             sticker_custom: [[79, 209, 197], [255, 184, 76]],
             border_opaque: false,
-            raw_counts: (0, 0),
+            raw_nodes: 0,
             node_counts: None,
-            segment_counts: None,
             palette: Vec::new(),
             rounded: Vec::new(),
             moved: Vec::new(),
@@ -143,7 +142,7 @@ impl Desktop {
             peek_button: None,
             rail_bar_since: None,
             prefs: None,
-            prefs_saved: (false, true),
+            prefs_saved: (false, true, false),
             licence: Default::default(),
             licence_saved: Default::default(),
             licence_input: String::new(),
@@ -158,6 +157,7 @@ impl Desktop {
             appearance_saved: (ThemeChoice::Dark, None),
             applied: Some(true),
             appearance_open: false,
+            rail_open: false,
             appearance_anchor: egui::Rect::NOTHING,
             vector_offer: None,
             foreign: None,
@@ -205,7 +205,7 @@ impl Desktop {
             zoom: 1.,
             fit: 1.,
             scroll: Vec2::ZERO,
-            nodes: true,
+            nodes: false,
             simplify: true,
             simplify_tolerance: DEFAULT_SIMPLIFY_TOLERANCE,
             simplify_pick: None,
@@ -756,14 +756,11 @@ impl Desktop {
             document,
             presented,
             nodes,
-            segments,
             palette,
         } = derived;
         self.preview =
             Some(ctx.load_texture("vector", presented.image, egui::TextureOptions::LINEAR));
-        let (raw_nodes, raw_segments) = self.raw_counts;
-        self.node_counts = Some((raw_nodes, nodes.len()));
-        self.segment_counts = Some((raw_segments, segments));
+        self.node_counts = Some((self.raw_nodes, nodes.len()));
         self.palette = palette;
         self.document = Some(document);
         self.shown = Some(presented.svg);
@@ -795,16 +792,14 @@ impl Desktop {
     pub(super) fn stale(&self) -> Option<&Replaced> {
         self.replaced.as_deref().filter(|_| self.preview.is_none())
     }
-    /// The node and segment counts (the engine's, then the shown ones) and
-    /// the number of fill colors on screen: the shown document's, or while a
+    /// The node counts (the engine's, then the shown ones) and the number
+    /// of fill colors on screen: the shown document's, or while a
     /// conversion runs the ones of the result it replaces, so the footer and
     /// the Nodes card change their numbers in place.
-    pub(super) fn shown_counts(&self) -> (Counts, Counts, usize) {
+    pub(super) fn shown_counts(&self) -> (Counts, usize) {
         match self.stale() {
-            Some(r) if self.document.is_none() => {
-                (r.node_counts, r.segment_counts, r.palette.len())
-            }
-            _ => (self.node_counts, self.segment_counts, self.palette.len()),
+            Some(r) if self.document.is_none() => (r.node_counts, r.palette.len()),
+            _ => (self.node_counts, self.palette.len()),
         }
     }
     /// The vector picture the card draws: the shown document's, or the one
@@ -955,13 +950,12 @@ impl Desktop {
     pub(super) fn clear_result(&mut self) {
         self.raw_document = None;
         self.raw_version += 1;
-        self.raw_counts = (0, 0);
+        self.raw_nodes = 0;
         self.document = None;
         self.shown = None;
         self.shown_margin = 0.;
         self.document_version += 1;
         self.node_counts = None;
-        self.segment_counts = None;
         self.palette.clear();
         self.node_menu = None;
         self.shape_menu = None;
@@ -1084,6 +1078,8 @@ impl Desktop {
         self.take_loaded(ctx, crate::decode_raster_up_to(bytes, max_pixels));
     }
     pub(super) fn take_loaded(&mut self, ctx: &egui::Context, loaded: Result<Raster, String>) {
+        // A picture opened shows the pictures: the phone sheet goes.
+        self.rail_open = false;
         let loaded = loaded.and_then(crate::fit_for_engine);
         if let Err(error) = &loaded {
             if self.raster.is_some() || self.foreign.is_some() {
@@ -1224,7 +1220,7 @@ impl Desktop {
             working_opaque: working.pixels.iter().all(|p| p.0[3] == 255),
             working,
             detected,
-            raw_counts: (raw.nodes().len(), raw.segment_count()),
+            raw_nodes: raw.nodes().len(),
             raw,
             derived: Derived::new(shown, presented),
             auto_tolerance,
@@ -1233,7 +1229,15 @@ impl Desktop {
             dropped: None,
         })
     }
+    /// Open the sample picture and convert it (`SAMPLE_PNG`).
+    pub(super) fn open_sample(&mut self, ctx: &egui::Context) {
+        self.load_bytes(ctx, "sample.png".into(), SAMPLE_PNG);
+        if self.raster.is_some() {
+            self.start();
+        }
+    }
     pub(super) fn start(&mut self) {
+        self.rail_open = false;
         self.start_with(None);
     }
     /// Convert on a thread of its own; with `drop`, work out the recolouring
@@ -1261,12 +1265,11 @@ impl Desktop {
         self.replaced = self.document.is_some().then(|| {
             Box::new(Replaced {
                 raw_document: self.raw_document.clone(),
-                raw_counts: self.raw_counts,
+                raw_nodes: self.raw_nodes,
                 document: self.document.clone(),
                 shown: self.shown.clone(),
                 shown_margin: self.shown_margin,
                 node_counts: self.node_counts,
-                segment_counts: self.segment_counts,
                 palette: self.palette.clone(),
                 preview: self.preview.clone(),
                 working_source: self.working_source.clone(),
@@ -1349,12 +1352,11 @@ impl Desktop {
         };
         let Replaced {
             raw_document,
-            raw_counts,
+            raw_nodes,
             document,
             shown,
             shown_margin,
             node_counts,
-            segment_counts,
             palette,
             preview,
             working_source,
@@ -1365,13 +1367,12 @@ impl Desktop {
             tile: _,
         } = *replaced;
         self.raw_document = raw_document;
-        self.raw_counts = raw_counts;
+        self.raw_nodes = raw_nodes;
         self.document = document;
         self.shown = shown;
         self.shown_margin = shown_margin;
         self.document_version += 1;
         self.node_counts = node_counts;
-        self.segment_counts = segment_counts;
         self.palette = palette;
         self.preview = preview;
         self.working_source = working_source;
@@ -1386,7 +1387,7 @@ impl Desktop {
             working_opaque,
             detected,
             raw,
-            raw_counts,
+            raw_nodes,
             derived,
             auto_tolerance,
             prep,
@@ -1433,7 +1434,7 @@ impl Desktop {
         }
         self.converted_prep = Some(prep);
         self.raw_document = Some(Arc::new(raw));
-        self.raw_counts = raw_counts;
+        self.raw_nodes = raw_nodes;
         if self.straighten_auto {
             if let Some(bow) = self.auto_bow() {
                 self.straighten_tolerance = bow;

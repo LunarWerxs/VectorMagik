@@ -13,20 +13,39 @@ impl Desktop {
                 ui.horizontal(|ui| {
                     let full = ui.max_rect();
                     let gap = 8.;
+                    // A phone's width: a settings button for the rail's sheet,
+                    // Convert as its icon and no view chips.
+                    let narrow = narrow_window(ctx);
+                    let (convert_width, chips) = if narrow { (36., 0.) } else { (112., 166.) };
+                    let settings = if narrow { 36. + gap } else { 0. };
                     // What the toolbar needs besides the picture's name: the
-                    // three icon buttons, Convert, the two view chips, the
+                    // three icon buttons, Convert, the view chips, the
                     // Appearance button and the gaps. In a narrow window the
                     // app's name gives way first, then the picture's.
-                    let fixed = 36. * 3. + 112. + 96. + 70. + 36. + gap * 8. + 6.;
+                    let (gaps, before_chips) = if narrow { (4., 0.) } else { (7., 6.) };
+                    let fixed = settings
+                        + 36. * 3.
+                        + convert_width
+                        + chips
+                        + before_chips
+                        + 36.
+                        + gap * (gaps + 1.);
                     let title = 30. + 10. + 110. + 12.;
                     let show_title = full.width() - title - fixed >= 160.;
-                    let lead = if show_title { title } else { 30. + 12. };
+                    // On a phone the logo gives way too, and the picture's
+                    // name shrinks further: the toolbar ran 50 px past a
+                    // 390 px screen.
+                    let lead = match (show_title, narrow) {
+                        (true, _) => title,
+                        (false, false) => 30. + 12.,
+                        (false, true) => 0.,
+                    };
                     let name_width = (full.width() * 0.24)
                         .clamp(140., 360.)
                         .min(full.width() - lead - fixed - 8.)
-                        .max(80.);
+                        .max(if narrow { 40. } else { 80. });
                     ui.spacing_mut().item_spacing.x = 10.;
-                    if let Some(logo) = &self.logo {
+                    if let (Some(logo), false) = (&self.logo, narrow) {
                         ui.add(egui::Image::new(egui::load::SizedTexture::new(
                             logo.id(),
                             Vec2::splat(30.),
@@ -40,10 +59,22 @@ impl Desktop {
                                 .color(pal().text),
                         );
                     }
+                    if narrow
+                        && icon_button(ui, icon::SETTINGS, true)
+                            .on_hover_text(if self.rail_open {
+                                "Back to the pictures"
+                            } else {
+                                "Settings"
+                            })
+                            .clicked()
+                    {
+                        self.rail_open = !self.rail_open;
+                    }
                     // The toolbar sits centred in the window, not in what is
                     // left beside the title: Open, the picture's name, Convert,
                     // Save, Close and the two view chips as one group.
-                    let group_width = 36. * 3. + 112. + name_width + 96. + 70. + gap * 7.;
+                    let group_width =
+                        36. * 3. + convert_width + name_width + chips + before_chips + gap * gaps;
                     let start = (full.center().x - group_width / 2.).max(ui.cursor().min.x + 12.);
                     ui.add_space((start - ui.cursor().min.x).max(0.));
                     ui.spacing_mut().item_spacing.x = gap;
@@ -104,7 +135,7 @@ impl Desktop {
                         {
                             actions.cancel = true;
                         }
-                    } else if self.convert_button(ui, ctx, can_convert) {
+                    } else if self.convert_button(ui, ctx, can_convert, narrow) {
                         actions.convert = true;
                     }
                     let can_save = (self.document.is_some() || self.foreign.is_some()) && idle;
@@ -136,22 +167,24 @@ impl Desktop {
                     {
                         actions.close = true;
                     }
-                    ui.add_space(6.);
-                    if choice_width(ui, "Side by side", self.view == View::SideBySide, 96.)
-                        .on_hover_text("The source and the vector next to each other")
-                        .clicked()
-                    {
-                        self.view = View::SideBySide;
-                    }
-                    if choice_width(ui, "Overlay", self.view == View::Overlay, 70.)
-                        .on_hover_text("One picture: B shows the bitmap, V the vector")
-                        .clicked()
-                    {
-                        self.view = View::Overlay;
+                    if !narrow {
+                        ui.add_space(6.);
+                        if choice_width(ui, "Side by side", self.view == View::SideBySide, 96.)
+                            .on_hover_text("The source and the vector next to each other")
+                            .clicked()
+                        {
+                            self.view = View::SideBySide;
+                        }
+                        if choice_width(ui, "Overlay", self.view == View::Overlay, 70.)
+                            .on_hover_text("One picture: B shows the bitmap, V the vector")
+                            .clicked()
+                        {
+                            self.view = View::Overlay;
+                        }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let button = icon_button(ui, icon::APPEARANCE, true)
-                            .on_hover_text("Appearance: the look, light or dark");
+                            .on_hover_text("Appearance: light, dark or the system's");
                         self.appearance_anchor = button.rect;
                         if button.clicked() {
                             self.appearance_open = !self.appearance_open;
@@ -161,24 +194,31 @@ impl Desktop {
             });
     }
 
-    /// The Convert button, lit when it can run; true when clicked.
-    fn convert_button(&self, ui: &mut egui::Ui, ctx: &egui::Context, can_convert: bool) -> bool {
-        let convert = if can_convert {
-            egui::Button::new(
-                RichText::new(format!("{}  Convert", icon::CONVERT))
-                    .color(pal().on_accent)
-                    .strong(),
-            )
-            .fill(pal().accent)
-            .stroke(Stroke::new(1_f32, pal().accent))
-            .corner_radius(CornerRadius::same(16))
+    /// The Convert button, lit when it can run (only its icon when
+    /// `compact`); true when clicked.
+    fn convert_button(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        can_convert: bool,
+        compact: bool,
+    ) -> bool {
+        let text = if compact {
+            icon::CONVERT.to_owned()
         } else {
-            egui::Button::new(
-                RichText::new(format!("{}  Convert", icon::CONVERT)).color(pal().text),
-            )
-            .corner_radius(CornerRadius::same(16))
+            format!("{}  Convert", icon::CONVERT)
         };
-        ui.add_enabled(can_convert, convert.min_size(Vec2::new(112., 32.)))
+        let convert = if can_convert {
+            egui::Button::new(RichText::new(text).color(pal().on_accent).strong())
+                .fill(pal().accent)
+                .stroke(Stroke::new(1_f32, pal().accent))
+                .corner_radius(CornerRadius::same(16))
+        } else {
+            egui::Button::new(RichText::new(text).color(pal().text))
+                .corner_radius(CornerRadius::same(16))
+        };
+        let width = if compact { 36. } else { 112. };
+        ui.add_enabled(can_convert, convert.min_size(Vec2::new(width, 32.)))
             .on_hover_text(format!(
                 "Convert the loaded image  ({})",
                 ctx.format_shortcut(&SC_CONVERT)
@@ -186,7 +226,7 @@ impl Desktop {
             .on_disabled_hover_text(if self.errand.is_some() || self.stopping.is_some() {
                 "Waiting for the dialog, the save or the cancelled conversion"
             } else if self.raster.is_some() && self.path != self.loaded_path {
-                "Press Enter to load the path you typed first"
+                "Answer the question about the vector file first"
             } else {
                 "Open an image first"
             })
@@ -195,6 +235,13 @@ impl Desktop {
 
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
         let family = self.title_family.clone();
+        let narrow = narrow_window(ctx);
+        if !narrow {
+            // The sheet is a phone's; a wider window has the rail itself.
+            self.rail_open = false;
+        } else if !self.rail_open {
+            return;
+        }
         let panel = egui::SidePanel::left("controls")
             .frame(egui::Frame::new().inner_margin(Margin {
                 left: 12,
@@ -202,9 +249,14 @@ impl Desktop {
                 top: 12 - SHADOW_REACH,
                 bottom: 10,
             }))
-            .resizable(true)
+            .resizable(!narrow)
             .default_width(296.)
-            .width_range(250.0..=400.)
+            .width_range(if narrow {
+                let whole = ctx.content_rect().width();
+                whole..=whole
+            } else {
+                250.0..=400.
+            })
             .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("rail-hints")
@@ -260,7 +312,9 @@ impl Desktop {
                         );
                     });
             });
-        rail_grip(ctx, panel.response.rect);
+        if !narrow {
+            rail_grip(ctx, panel.response.rect);
+        }
     }
 
     /// The rail's scroll bar: a thin line at rest that widens and takes
@@ -381,12 +435,12 @@ impl Desktop {
                 " \u{00B7} no corners"
             }
         );
+        // Off in plain words; the numbers only once the sliders are in use (a
+        // first-timer read "Preset 11 3 6" as jargon).
         let summary = if self.advanced_on {
             values
-        } else if self.pending_advanced().flatten().is_some() {
-            format!("Preset \u{00B7} {values}")
         } else {
-            "Preset".to_owned()
+            "Off".to_owned()
         };
         let on = self.advanced_on;
         card(
@@ -403,8 +457,7 @@ impl Desktop {
                         .on_hover_text(
                             "The original program's advanced mode: its three sliders replace the \
                      image type's preset (the type still decides anti-aliasing and photo \
-                     seams). Starts from the settings the picture would get anyway, which \
-                     the heading shows while this is off.",
+                     seams). Starts from the settings the picture would get anyway.",
                         )
                         .changed();
                     if switched && self.advanced_on {
@@ -807,7 +860,7 @@ impl Desktop {
                             "Once the image has been converted, changing a setting converts \
                              it again by itself, a moment after the last change; a \
                              conversion still running with the old settings is stopped. \
-                             Opening an image never converts it.",
+                             Opening your own image never converts it by itself.",
                         );
                 });
                 if self.conversion_stale() && self.worker.is_none() {

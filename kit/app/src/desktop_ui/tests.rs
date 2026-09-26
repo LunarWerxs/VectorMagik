@@ -1090,10 +1090,6 @@ fn edits_made_while_converting_apply_to_its_result() {
         app.node_counts,
         Some((raw.nodes().len(), document.nodes().len()))
     );
-    assert_eq!(
-        app.segment_counts,
-        Some((raw.segment_count(), document.segment_count()))
-    );
     let mut counted: Vec<(String, usize)> = Vec::new();
     for fill in document
         .svg()
@@ -1808,18 +1804,21 @@ fn hold_shows_the_other_picture_only_while_it_is_held() {
 #[test]
 fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
     let dark = (ThemeChoice::Dark, None);
-    let text = prefs::write_prefs((true, false), &Default::default(), dark);
-    assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
+    let text = prefs::write_prefs((true, false, true), &Default::default(), dark);
+    assert_eq!(
+        prefs::parse_prefs(&text, (false, true, false)),
+        (true, false, true)
+    );
     assert!(!text.contains("licence"));
     assert_eq!(prefs::parse_appearance(&text), dark);
     // Light or dark and the first-run answer ride along; words not
     // understood keep the defaults.
     let chosen = (ThemeChoice::System, Some(LicenceUse::Commercial));
-    let text = prefs::write_prefs((true, false), &Default::default(), chosen);
+    let text = prefs::write_prefs((true, false, false), &Default::default(), chosen);
     assert_eq!(prefs::parse_appearance(&text), chosen);
     // A free commercial trial keeps when it began.
     let trial = (ThemeChoice::Dark, Some(LicenceUse::Trial(1_758_700_000)));
-    let text = prefs::write_prefs((true, false), &Default::default(), trial);
+    let text = prefs::write_prefs((true, false, false), &Default::default(), trial);
     assert!(text.contains("licence_use=trial:1758700000\r\n"), "{text}");
     assert_eq!(prefs::parse_appearance(&text), trial);
     assert_eq!(
@@ -1832,8 +1831,11 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
         key: "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into(),
         certificate: "payload.signature".into(),
     };
-    let text = prefs::write_prefs((true, false), &licence, dark);
-    assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
+    let text = prefs::write_prefs((true, false, false), &licence, dark);
+    assert_eq!(
+        prefs::parse_prefs(&text, (false, true, true)),
+        (true, false, false)
+    );
     assert_eq!(prefs::parse_licence(&text), licence);
     assert_eq!(
         prefs::parse_licence("licence_key=nonsense\nlicence_certificate=a.b\n"),
@@ -1842,9 +1844,9 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
     assert_eq!(
         prefs::parse_prefs(
             "junk\nhold_compare=maybe\nauto_convert=off\nother=on\n",
-            (true, true)
+            (true, true, true)
         ),
-        (true, false)
+        (true, false, true)
     );
     let ctx = egui::Context::default();
     let path = scratch("prefs").join("desktop.txt");

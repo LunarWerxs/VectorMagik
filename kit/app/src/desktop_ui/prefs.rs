@@ -1,5 +1,5 @@
 //! Part of `desktop_ui`: the window's preferences, kept between runs in a
-//! small text file of `name=on|off` lines, the look (`look=`, `theme=`), the
+//! small text file of `name=on|off` lines, light or dark (`theme=`), the
 //! answer to the first-run question (`licence_use=`) and the commercial
 //! licence's key and certificate (`licence_key=`, `licence_certificate=`).
 //! The file sits beside the program when its folder takes files, so the app
@@ -65,9 +65,9 @@ pub(super) fn installed_prefs() -> Option<PathBuf> {
 }
 
 /// The preferences in `text`, over `defaults` (hold to compare, convert
-/// automatically); lines it does not know are ignored.
-pub(super) fn parse_prefs(text: &str, defaults: (bool, bool)) -> (bool, bool) {
-    let (mut hold, mut auto) = defaults;
+/// automatically, show the curve nodes); lines it does not know are ignored.
+pub(super) fn parse_prefs(text: &str, defaults: (bool, bool, bool)) -> (bool, bool, bool) {
+    let (mut hold, mut auto, mut nodes) = defaults;
     for line in text.lines() {
         let Some((name, value)) = line.split_once('=') else {
             continue;
@@ -80,10 +80,11 @@ pub(super) fn parse_prefs(text: &str, defaults: (bool, bool)) -> (bool, bool) {
         match name.trim() {
             "hold_compare" => hold = on,
             "auto_convert" => auto = on,
+            "show_nodes" => nodes = on,
             _ => {}
         }
     }
-    (hold, auto)
+    (hold, auto, nodes)
 }
 
 /// The licence kept in `text`: its key (only a well-shaped one) and its
@@ -123,15 +124,16 @@ pub(super) fn parse_appearance(text: &str) -> (ThemeChoice, Option<LicenceUse>) 
 }
 
 pub(super) fn write_prefs(
-    (hold, auto): (bool, bool),
+    (hold, auto, nodes): (bool, bool, bool),
     licence: &crate::licence::Stored,
     (theme, answer): (ThemeChoice, Option<LicenceUse>),
 ) -> String {
     let word = |on: bool| if on { "on" } else { "off" };
     let mut text = format!(
-        "hold_compare={}\r\nauto_convert={}\r\ntheme={}\r\n",
+        "hold_compare={}\r\nauto_convert={}\r\nshow_nodes={}\r\ntheme={}\r\n",
         word(hold),
         word(auto),
+        word(nodes),
         theme.word()
     );
     if let Some(answer) = answer {
@@ -160,12 +162,12 @@ impl Desktop {
                 .and_then(|old| std::fs::read_to_string(old).ok())
         });
         if let Some(text) = text {
-            (self.hold_compare, self.auto_convert) =
-                parse_prefs(&text, (self.hold_compare, self.auto_convert));
+            (self.hold_compare, self.auto_convert, self.nodes) =
+                parse_prefs(&text, (self.hold_compare, self.auto_convert, self.nodes));
             self.licence = parse_licence(&text);
             (self.theme, self.licence_use) = parse_appearance(&text);
         }
-        self.prefs_saved = (self.hold_compare, self.auto_convert);
+        self.prefs_saved = (self.hold_compare, self.auto_convert, self.nodes);
         self.licence_saved = self.licence.clone();
         self.appearance_saved = (self.theme, self.licence_use);
         self.prefs = Some(path);
@@ -173,7 +175,7 @@ impl Desktop {
     /// Write the preferences when one has changed; a failure costs only the
     /// memory of them, so it is not reported.
     pub(super) fn save_prefs(&mut self) {
-        let now = (self.hold_compare, self.auto_convert);
+        let now = (self.hold_compare, self.auto_convert, self.nodes);
         let appearance = (self.theme, self.licence_use);
         let changed = now != self.prefs_saved
             || self.licence != self.licence_saved

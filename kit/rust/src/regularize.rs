@@ -681,11 +681,14 @@ pub(crate) fn fit_ellipse(points: &[Point]) -> Option<Ellipse> {
 /// turn the run makes.
 fn unwrapped(mut angles: Vec<f64>) -> Vec<f64> {
     for k in 1..angles.len() {
-        while angles[k] - angles[k - 1] > PI {
-            angles[k] -= 2. * PI;
-        }
-        while angles[k - 1] - angles[k] > PI {
-            angles[k] += 2. * PI;
+        // As many whole turns as the loops this replaced took off, in one
+        // step, so an angle a far Newton step left enormous cannot loop for
+        // ever; one turn, the common case, is the same subtraction.
+        let step = angles[k] - angles[k - 1];
+        if step > PI {
+            angles[k] -= 2. * PI * ((step - PI) / (2. * PI)).ceil();
+        } else if -step > PI {
+            angles[k] += 2. * PI * ((-step - PI) / (2. * PI)).ceil();
         }
     }
     angles

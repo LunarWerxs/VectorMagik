@@ -619,16 +619,32 @@ pub(super) fn legend(ui: &mut egui::Ui, entries: &[(String, &str)]) {
 /// legend always on screen took three rows of the rail for what every
 /// button's tooltip already says (the Dredd review of September 23, 2026).
 pub(super) fn shortcuts(ui: &mut egui::Ui, entries: &[(String, &str)]) {
-    ui.add(
-        egui::Label::new(
-            RichText::new(format!("{}  Keyboard shortcuts", super::icon::INFO))
-                .size(11.)
-                .color(pal().faint),
+    let response = ui
+        .add(
+            egui::Label::new(
+                RichText::new(format!("{}  Keyboard shortcuts", super::icon::INFO))
+                    .size(11.)
+                    .color(pal().faint),
+            )
+            .selectable(false)
+            .sense(egui::Sense::click()),
         )
-        .selectable(false)
-        .sense(egui::Sense::hover()),
-    )
-    .on_hover_ui(|ui| legend(ui, entries));
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    // Shown on hover, and held open by a click (a visitor clicked it and
+    // nothing happened, SUE, September 25, 2026).
+    let id = ui.make_persistent_id("shortcuts-legend");
+    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    if response.clicked() {
+        open = !open;
+    }
+    if open {
+        anchored_popup(id, ui.ctx(), response.rect, egui::RectAlign::TOP_START)
+            .open_bool(&mut open)
+            .show(|ui| legend(ui, entries));
+    } else {
+        response.on_hover_ui(|ui| legend(ui, entries));
+    }
+    ui.data_mut(|d| d.insert_temp(id, open));
 }
 
 /// A footer stat: a chip that reacts to the pointer and can be lit up when
@@ -724,15 +740,15 @@ pub(super) fn tile_pair(
     (second, second_chosen): ([&str; 4], bool),
 ) -> (bool, bool) {
     if narrow {
-        let a = choice_tile(ui, family, first, first_chosen).clicked();
-        let b = choice_tile(ui, family, second, second_chosen).clicked();
+        let a = choice_tile(ui, family, first, first_chosen, true).clicked();
+        let b = choice_tile(ui, family, second, second_chosen, false).clicked();
         return (a, b);
     }
     ui.columns(2, |columns| {
         columns[0].spacing_mut().item_spacing.y = 4.;
         columns[1].spacing_mut().item_spacing.y = 4.;
-        let a = choice_tile(&mut columns[0], family, first, first_chosen).clicked();
-        let b = choice_tile(&mut columns[1], family, second, second_chosen).clicked();
+        let a = choice_tile(&mut columns[0], family, first, first_chosen, true).clicked();
+        let b = choice_tile(&mut columns[1], family, second, second_chosen, false).clicked();
         (a, b)
     })
 }
@@ -745,12 +761,15 @@ pub(super) fn dialog_width(ctx: &egui::Context, widest: f32) -> f32 {
 
 /// One answer of a question put as tiles: a title, a price, a line saying
 /// what it is for and a button, the whole tile lit while `chosen`. The
-/// button's response.
+/// `primary` answer's button is filled with the accent, the other's only
+/// outlined, so the two do not weigh the same (the board of September 25,
+/// 2026: "use identical button fills and weights"). The button's response.
 pub(super) fn choice_tile(
     ui: &mut egui::Ui,
     family: &FontFamily,
     [title, price, about, button]: [&str; 4],
     chosen: bool,
+    primary: bool,
 ) -> egui::Response {
     let p = pal();
     egui::Frame::new()
@@ -782,14 +801,20 @@ pub(super) fn choice_tile(
                 },
             );
             ui.add_space(4.);
+            let filled = chosen || primary;
             ui.add_sized(
                 [ui.available_width(), 30.],
-                egui::Button::new(RichText::new(button).color(if chosen {
+                egui::Button::new(RichText::new(button).color(if filled {
                     p.on_accent
                 } else {
-                    p.text
+                    p.accent
                 }))
-                .fill(if chosen { p.accent } else { p.chip })
+                .fill(if filled {
+                    p.accent
+                } else {
+                    Color32::TRANSPARENT
+                })
+                .stroke(Stroke::new(1_f32, p.accent))
                 .corner_radius(CornerRadius::same(p.control_radius.max(8))),
             )
         })

@@ -6,11 +6,8 @@ impl Desktop {
     /// The footer: the status on the left; on the right the result stats
     /// (each one clickable) and the zoom controls.
     pub(super) fn status_bar(&mut self, ctx: &egui::Context) {
-        let (node_counts, segment_counts, palette) = self.shown_counts();
-        let stats = match (node_counts, segment_counts) {
-            (Some((_, nodes)), Some((_, segments))) => Some((nodes, segments, palette)),
-            _ => None,
-        };
+        let (node_counts, palette) = self.shown_counts();
+        let stats = node_counts.map(|(_, nodes)| (nodes, palette));
         // The picture opened, also when the engine traced a scaled copy.
         let raster_size = self
             .raster
@@ -110,7 +107,7 @@ impl Desktop {
                             fit = true;
                         }
                         ui.add_space(8.);
-                        if let (Some((nodes, _, colors)), true) = (stats, show_detail) {
+                        if let (Some((nodes, colors)), true) = (stats, show_detail) {
                             let tip = if self.nodes {
                                 "Curve nodes are shown. Click to hide them.  (N)"
                             } else {
@@ -371,10 +368,8 @@ impl Desktop {
         });
     }
 
-    /// Save: the format first, the size, then either the system dialog or a
-    /// file to drag straight onto the desktop or into a folder.
-    /// The Appearance popup under its header button: the look, and light or
-    /// dark (a tab follows the page's switch instead).
+    /// The Appearance popup under its header button: light, dark or the
+    /// system's.
     pub(super) fn appearance_popup(&mut self, ctx: &egui::Context) {
         if !self.appearance_open {
             return;
@@ -457,46 +452,49 @@ impl Desktop {
             ui.add_space(2.);
             self.size_controls(ui, unit_size);
             ui.add_space(2.);
-            // The original's "Shape mode", with the app's stacked drawing
-            // first: what the window shows.
-            labelled_row(ui, "Shapes", |ui| {
-                ui.spacing_mut().item_spacing.x = 4.;
-                let cut_plain = !self.save_stacked && !self.save_grouped;
-                let cut_grouped = !self.save_stacked && self.save_grouped;
-                if choice_width(ui, "Cut-outs", cut_plain, 64.)
-                    .on_hover_text(
-                        "Every shape cut out of the ones below it, nothing overlapping, \
+            more_options(ui, "save", |ui| {
+                // The original's "Shape mode", with the app's stacked drawing
+                // first: what the window shows.
+                labelled_row(ui, "Shapes", |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.;
+                    let cut_plain = !self.save_stacked && !self.save_grouped;
+                    let cut_grouped = !self.save_stacked && self.save_grouped;
+                    if choice_width(ui, "Cut-outs", cut_plain, 64.)
+                        .on_hover_text(
+                            "Every shape cut out of the ones below it, nothing overlapping, \
                          in one list (the original's \"cut-outs in shapes below\").",
-                    )
-                    .clicked()
-                {
-                    (self.save_stacked, self.save_grouped) = (false, false);
-                }
-                if choice_width(ui, "By color", cut_grouped, 64.)
-                    .on_hover_text(
-                        "Cut-outs grouped by colour, one group per colour: the original's \
+                        )
+                        .clicked()
+                    {
+                        (self.save_stacked, self.save_grouped) = (false, false);
+                    }
+                    if choice_width(ui, "By color", cut_grouped, 64.)
+                        .on_hover_text(
+                            "Cut-outs grouped by colour, one group per colour: the original's \
                          default, handy for recolouring in an editor.",
-                    )
-                    .clicked()
-                {
-                    (self.save_stacked, self.save_grouped) = (false, true);
-                }
-                if choice_width(ui, "Stacked", self.save_stacked, 64.)
-                    .on_hover_text(
-                        "As shown: each color runs a hair under the edges of the colors \
+                        )
+                        .clicked()
+                    {
+                        (self.save_stacked, self.save_grouped) = (false, true);
+                    }
+                    if choice_width(ui, "Stacked", self.save_stacked, 64.)
+                        .on_hover_text(
+                            "As shown: each color runs a hair under the edges of the colors \
                          drawn after it, so no thin background line shows between two \
                          colors.",
-                    )
-                    .clicked()
-                {
-                    self.save_stacked = true;
-                }
-            });
-            toggle_row(ui, &mut self.save_stroke, "Stroke shape boundaries", None).on_hover_text(
-                "Also draw every shape's outline in its own colour, a hair wide, so \
+                        )
+                        .clicked()
+                    {
+                        self.save_stacked = true;
+                    }
+                });
+                toggle_row(ui, &mut self.save_stroke, "Stroke shape boundaries", None)
+                    .on_hover_text(
+                        "Also draw every shape's outline in its own colour, a hair wide, so \
                  viewers that leave faint seams between neighbouring shapes show \
                  none (the original's stroking mode).",
-            );
+                    );
+            });
             if self.save_format == Format::Dxf {
                 labelled_row(ui, "DXF curves", |ui| {
                     ui.spacing_mut().item_spacing.x = 4.;
@@ -773,7 +771,11 @@ impl Desktop {
                 ui.separator();
                 if ui
                     .button("Put back")
-                    .on_hover_text("Returns the node to where the trace put it.")
+                    .on_hover_text(if current.is_some() {
+                        "Returns the node to where the trace put it. Its rounding stays: Restore corner takes that off."
+                    } else {
+                        "Returns the node to where the trace put it."
+                    })
                     .clicked()
                 {
                     put_back = true;

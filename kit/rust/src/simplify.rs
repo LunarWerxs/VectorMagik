@@ -442,6 +442,9 @@ pub(crate) fn largest_distance(samples: &[Point], cubic: &Cubic) -> Option<f64> 
 
 fn chord_parameters(samples: &[Point]) -> Option<Vec<f64>> {
     let n = samples.len();
+    if n < 2 {
+        return None;
+    }
     let mut u = vec![0.; n];
     for i in 1..n {
         u[i] = u[i - 1] + distance(samples[i - 1], samples[i]);
@@ -756,6 +759,12 @@ fn off_segment(samples: &[Point], a: Point, b: Point) -> f64 {
         .fold(0., f64::max)
 }
 
+/// How far `dissolve` may turn the straight piece where it starts, in
+/// degrees: more bends its join with the piece before it (a 1.5 px piece
+/// taken 0.3 px sideways turned about 40 degrees; the Opus review of
+/// September 25, 2026).
+const MAX_LINE_TILT: f64 = 2.;
+
 /// A piece no further than this share of the tolerance from its chord is
 /// straight: the kind `dissolve` lengthens, and how straight what it takes
 /// on must be. Taking on anything within the whole tolerance flattened the
@@ -790,6 +799,7 @@ fn dissolve(line: &Piece, middle: &Piece, curve: &Piece, tolerance: f64) -> Opti
     if !smooth(line, middle) || !smooth(middle, curve) {
         return None;
     }
+    let was = normalized(sub(end, start));
     let mut best: Option<(f64, usize, Cubic)> = None;
     for k in 1..middle.samples.len() - 1 {
         let at = middle.samples[k];
@@ -799,11 +809,14 @@ fn dissolve(line: &Piece, middle: &Piece, curve: &Piece, tolerance: f64) -> Opti
             at,
         ));
         if straight > tolerance * STRAIGHT_SHARE {
-            continue;
+            break;
         }
         let Some(along) = normalized(sub(at, start)) else {
             continue;
         };
+        if was.is_some_and(|was| signed_turn(was, along).abs() > MAX_LINE_TILT) {
+            continue;
+        }
         let mut rest = middle.samples[k..].to_vec();
         rest.extend_from_slice(&curve.samples[1..]);
         let Some((cubic, error)) = fit_samples(&rest, along, curve.end_direction()) else {
@@ -1330,8 +1343,9 @@ fn split_edge(edge: &Edge, t: f64) -> (Edge, Edge) {
 /// each side and replaced by the rounded corner, but never more than that
 /// fraction of `ROUNDING_CAP` times the picture's shorter side, so a corner
 /// between two long straight edges still rounds like a corner, not a lens.
-/// Both sides are cut by the same length, so the corner comes out as an even
-/// arc.
+/// Both sides are cut by the same share of the shorter side's length along
+/// its control polygon (about the same length along each curve), so the
+/// corner comes out as an even arc.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rounding {
     pub at: Point,
@@ -1599,7 +1613,7 @@ pub fn smooth_nodes(svg: &str, nodes: &[Rounding]) -> Result<(String, usize), St
     for subpath in paths.iter_mut().flatten() {
         let n = subpath.edges.len();
         let cyclic = subpath.cyclic();
-        let mut rebuilt = Vec::with_capacity(n + arcs.len());
+        let mut rebuilt = Vec::with_capacity(n + n.min(arcs.len()));
         for i in 0..n {
             let edge = subpath.edges[i];
             let (edge_key, reversed) = edge.key();

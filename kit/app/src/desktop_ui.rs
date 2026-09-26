@@ -48,6 +48,23 @@ const NODE_SHADOW: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 120);
 /// Half the side of a node marker's square, the radius of its circle.
 const NODE_MARKER_RADIUS: f32 = 3.5;
 
+/// A window narrower than this is a phone's: the rail becomes a sheet
+/// behind the toolbar's settings button, the view chips go and Convert is
+/// its icon (SUE's phone visitor, September 25, 2026: held upright, the app
+/// was cut off on the right).
+const NARROW_WIDTH: f32 = 760.;
+
+/// Whether the window is phone-narrow (`NARROW_WIDTH`).
+fn narrow_window(ctx: &egui::Context) -> bool {
+    ctx.content_rect().width() < NARROW_WIDTH
+}
+
+/// A picture to try the app on without one of one's own: the SVG format's
+/// logo (free for any use; kit/fixtures/samples/LICENSE.txt). Every visitor
+/// SUE sent on September 25, 2026 left with nothing traced, having no image
+/// to hand.
+const SAMPLE_PNG: &[u8] = include_bytes!("../../fixtures/samples/logo-with-blending.png");
+
 /// How far zoom goes, as display scales (screen pixels per source pixel):
 /// out to a quarter of fit or of 1:1, whichever is smaller, and in to 32
 /// screen pixels per source pixel or eight times fit, whichever is larger.
@@ -136,53 +153,22 @@ pub mod icon {
     // A trigram in egui's icon font on every system (U+2637 is in no font the
     // app loads, Segoe UI included, and drew as a box).
     pub const SLIDERS: &str = "\u{2630}";
-    pub const AUTO: &str = "\u{26A1}";
-    pub const VIEW: &str = "\u{1F441}";
     pub const NODES: &str = "\u{25A3}";
-    pub const ZOOM: &str = "\u{1F50D}";
     pub const SOURCE: &str = "\u{1F5BC}";
     pub const VECTOR: &str = "\u{1F58A}";
     pub const INFO: &str = "\u{2139}";
-    pub const BUSY: &str = "\u{23F3}";
     pub const DONE: &str = "\u{2714}";
     pub const ERROR: &str = "\u{26A0}";
     pub const SIZE: &str = "\u{1F4CF}";
     pub const COLORS: &str = "\u{1F3A8}";
     pub const SEGMENTS: &str = "\u{2731}";
-    pub const TIME: &str = "\u{23F1}";
     pub const FILE: &str = "\u{1F4C4}";
     pub const SHAPES: &str = "\u{1F4A0}";
     pub const STICKER: &str = "\u{2B23}";
-    pub const OPEN_CARD: &str = "\u{25BC}";
-    pub const CLOSED_CARD: &str = "\u{25BA}";
     pub const APPEARANCE: &str = "\u{1F313}";
-    pub const ALL: [&str; 26] = [
-        OPEN,
-        CONVERT,
-        SAVE,
-        CLOSE,
-        SETTINGS,
-        SLIDERS,
-        AUTO,
-        VIEW,
-        NODES,
-        ZOOM,
-        SOURCE,
-        VECTOR,
-        INFO,
-        BUSY,
-        DONE,
-        ERROR,
-        SIZE,
-        COLORS,
-        SEGMENTS,
-        TIME,
-        FILE,
-        SHAPES,
-        STICKER,
-        OPEN_CARD,
-        CLOSED_CARD,
-        APPEARANCE,
+    pub const ALL: [&str; 19] = [
+        OPEN, CONVERT, SAVE, CLOSE, SETTINGS, SLIDERS, NODES, SOURCE, VECTOR, INFO, DONE, ERROR,
+        SIZE, COLORS, SEGMENTS, FILE, SHAPES, STICKER, APPEARANCE,
     ];
 }
 
@@ -462,7 +448,7 @@ pub enum Overlay {
     Shapes,
     /// The first-run question: personal or commercial use.
     Licence,
-    /// The Appearance popup: the look, light or dark.
+    /// The Appearance popup: light, dark or the system's.
     Appearance,
 }
 
@@ -511,7 +497,6 @@ impl LicenceUse {
 #[derive(Default)]
 struct Actions {
     open: bool,
-    load: bool,
     convert: bool,
     cancel: bool,
     save: bool,
@@ -632,12 +617,11 @@ enum DeriveJob {
 /// reshow").
 struct Replaced {
     raw_document: Option<Arc<VectorDocument>>,
-    raw_counts: (usize, usize),
+    raw_nodes: usize,
     document: Option<VectorDocument>,
     shown: Option<Arc<String>>,
     shown_margin: f32,
     node_counts: Option<(usize, usize)>,
-    segment_counts: Option<(usize, usize)>,
     palette: Vec<(String, usize)>,
     preview: Option<egui::TextureHandle>,
     working_source: Option<egui::TextureHandle>,
@@ -744,14 +728,12 @@ struct Derived {
     document: VectorDocument,
     presented: Presented,
     nodes: Arc<Vec<Point>>,
-    segments: usize,
     palette: Vec<(String, usize)>,
 }
 impl Derived {
     fn new(document: VectorDocument, presented: Presented) -> Self {
         Self {
             nodes: Arc::new(document.nodes()),
-            segments: document.segment_count(),
             palette: document.colors(),
             document,
             presented,
@@ -770,7 +752,7 @@ struct Converted {
     working_opaque: bool,
     detected: Option<crate::auto::Detection>,
     raw: VectorDocument,
-    raw_counts: (usize, usize),
+    raw_nodes: usize,
     derived: Derived,
     auto_tolerance: Option<f64>,
     prep: Preparation,
@@ -835,14 +817,13 @@ pub struct Desktop {
     /// Whether the image the engine saw has an opaque border, so there is a
     /// background shape the Sticker card can cut out.
     border_opaque: bool,
-    /// (nodes, segments) of the engine's document, counted once per
-    /// conversion on its thread.
-    raw_counts: (usize, usize),
+    /// The engine's document's nodes, counted once per conversion on its
+    /// thread.
+    raw_nodes: usize,
     /// (engine nodes, shown nodes) for the Curves card.
     node_counts: Option<(usize, usize)>,
-    /// (engine segments, shown segments) and the shown fills, kept with the
-    /// document so the footer and card headings never parse it per frame.
-    segment_counts: Option<(usize, usize)>,
+    /// The shown fills, kept with the document so the footer and card
+    /// headings never parse it per frame.
     palette: Vec<(String, usize)>,
     /// Nodes the user rounded, each with its own reach; applied on top of
     /// simplification.
@@ -891,7 +872,7 @@ pub struct Desktop {
     /// kept; `None` for snapshots and tests, which never read or write them.
     prefs: Option<PathBuf>,
     /// The preferences as last written, so they are written when changed.
-    prefs_saved: (bool, bool),
+    prefs_saved: (bool, bool, bool),
     /// The commercial licence (`crate::licence`): the key and its latest
     /// certificate, kept with the preferences, and as last saved.
     licence: crate::licence::Stored,
@@ -916,11 +897,15 @@ pub struct Desktop {
     licence_opened: bool,
     /// The design and the light or dark the person chose.
     theme: ThemeChoice,
-    /// The look, theme and answer as last written with the preferences.
+    /// Light or dark and the first-run answer as last written with the
+    /// preferences.
     appearance_saved: (ThemeChoice, Option<LicenceUse>),
-    /// The look and darkness the style was last built for.
+    /// Whether the style was last built dark.
     applied: Option<bool>,
     appearance_open: bool,
+    /// In a phone-narrow window the rail is a sheet over the whole window,
+    /// shown while this is set (the toolbar's settings button).
+    rail_open: bool,
     /// Where the Appearance button was drawn, so its popup hangs below it.
     appearance_anchor: egui::Rect,
     /// A vector file just opened, waiting for "trace it or convert it"
