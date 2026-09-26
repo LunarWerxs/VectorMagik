@@ -437,8 +437,8 @@ pub(super) fn icon_button(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui
         enabled,
         egui::Button::new(RichText::new(glyph).size(15.).color(pal().text))
             .min_size(Vec2::new(36., 32.))
-            .frame_when_inactive(pal().framed_icons)
-            .corner_radius(CornerRadius::same(if pal().floating { 16 } else { 10 })),
+            .frame_when_inactive(true)
+            .corner_radius(CornerRadius::same(16)),
     )
 }
 
@@ -560,16 +560,13 @@ pub(super) fn grab_cursor(ui: &egui::Ui, response: &egui::Response) {
     }
 }
 
-/// The frame of the header (`top`) and status bars: edge to edge, or in the
-/// Glass look a pane floating over the backdrop.
+/// The frame of the header (`top`) and status bars: a pane floating over the
+/// backdrop.
 pub(super) fn bar_frame(vertical: i8, top: bool) -> egui::Frame {
     let p = pal();
     let frame = egui::Frame::new()
         .fill(p.panel)
         .inner_margin(Margin::symmetric(16, vertical));
-    if !p.floating {
-        return frame;
-    }
     // Room for the shadow below the header and below the status bar.
     let (above, below) = if top { (10, 10) } else { (4, 10) };
     frame
@@ -710,10 +707,7 @@ pub(super) fn popup_frame() -> egui::Frame {
     let p = pal();
     egui::Frame::new()
         .fill(p.popup)
-        .stroke(Stroke::new(
-            1_f32,
-            if p.floating { p.card_stroke } else { p.border },
-        ))
+        .stroke(Stroke::new(1_f32, p.card_stroke))
         .corner_radius(p.card_radius.max(12))
         .inner_margin(Margin::same(14))
         .shadow(p.popup_shadow)

@@ -372,6 +372,8 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
       } else if (tag === 3) {
         const text = str();
         try { localStorage.setItem('vectormagik.prefs', text); } catch { /* private mode */ }
+        const theme = /^theme=(dark|light|system)/m.exec(text);
+        if (theme) pageTheme(theme[1]);
         // The app's answer to "personal or commercial use?" is the site's
         // license choice too (its header badge, 'vm-license').
         const use = /^licence_use=(personal|commercial)/m.exec(text);
@@ -584,6 +586,12 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   // --- start the app -------------------------------------------------------
   let prefs = '';
   try { prefs = localStorage.getItem('vectormagik.prefs') || ''; } catch { /* private mode */ }
+  // Light or dark as the site's switch on its other pages left it, when it
+  // was set there last.
+  try {
+    const site = localStorage.getItem('vm-theme');
+    if (site === 'light' || site === 'dark') prefs = prefs.replace(/^theme=.*$/m, '') + `theme=${site}\r\n`;
+  } catch { /* private mode */ }
   // A visitor who already told the site personal or commercial use is not
   // asked again by the app.
   try {
@@ -599,8 +607,23 @@ export async function startApp(canvas, { wasmUrl, onError } = {}) {
   e.vm_app_start(prefsPtr, prefsBytes.length);
   e.vm_dealloc(prefsPtr, prefsLen);
 
-  // The page's light and dark switch (data-theme on <html>) is the app's
-  // too; without one, the system's preference.
+  // The app's light or dark (its Appearance popup) is the page's too, and the
+  // site's other pages': System follows the device, set on the page as what
+  // the device says so the page's own colours match.
+  const pageTheme = (word) => {
+    const light = word === 'light'
+      || (word === 'system' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+    document.documentElement.dataset.theme = light ? 'light' : 'dark';
+    try {
+      if (word === 'system') localStorage.removeItem('vm-theme');
+      else localStorage.setItem('vm-theme', word);
+    } catch { /* private mode */ }
+  };
+  const saved = /^theme=(dark|light|system)/m.exec(prefs);
+  if (saved) pageTheme(saved[1]);
+
+  // What the page shows (data-theme on <html>) is what the app's System
+  // follows; without one, the device's preference.
   const pageDark = () => {
     const theme = document.documentElement.dataset.theme;
     if (theme === 'light' || theme === 'dark') return theme === 'dark';

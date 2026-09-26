@@ -1,5 +1,5 @@
-//! The desktop window: a lean workspace (three looks, light or dark:
-//! `look.rs`) with a settings rail of cards,
+//! The desktop window: a lean workspace (Glass, light or dark: `look.rs`)
+//! with a settings rail of cards,
 //! two comparison cards that pick the orientation giving the largest picture,
 //! synchronized zoom and pan, crisp re-rendering of the vector at any zoom,
 //! live curve simplification with an automatic tolerance, drag-and-drop onto
@@ -37,9 +37,8 @@ use vector_rebuild::sticker::Sticker;
 use vector_rebuild::straighten::StraightenOptions;
 use vector_rebuild::{AdvancedSettings, ImageCategory, Quality};
 
-// The window's colours come from the palette of the look in force
-// (`look.rs`); these few are drawn over the picture itself and stay the same
-// in every look.
+// The window's colours come from the palette in force (`look.rs`); these
+// few are drawn over the picture itself and stay the same light or dark.
 const NODE: Color32 = Color32::from_rgb(64, 205, 255);
 const NODE_SMOOTH: Color32 = Color32::from_rgb(140, 230, 120);
 const SHAPE_HOVER: Color32 = Color32::from_rgb(255, 255, 255);
@@ -916,12 +915,11 @@ pub struct Desktop {
     /// The checkout was opened from the question, which then says so.
     licence_opened: bool,
     /// The design and the light or dark the person chose.
-    look: Look,
     theme: ThemeChoice,
     /// The look, theme and answer as last written with the preferences.
-    appearance_saved: (Look, ThemeChoice, Option<LicenceUse>),
+    appearance_saved: (ThemeChoice, Option<LicenceUse>),
     /// The look and darkness the style was last built for.
-    applied: Option<(Look, bool)>,
+    applied: Option<bool>,
     appearance_open: bool,
     /// Where the Appearance button was drawn, so its popup hangs below it.
     appearance_anchor: egui::Rect,
@@ -1043,8 +1041,8 @@ mod vector_ui;
 mod widgets;
 mod workspace;
 
+pub use look::ThemeChoice;
 use look::{faded, pal, SHADOW_REACH};
-pub use look::{Look, ThemeChoice};
 use widgets::*;
 
 #[cfg(feature = "desktop")]

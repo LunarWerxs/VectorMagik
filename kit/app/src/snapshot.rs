@@ -206,8 +206,7 @@ pub struct Options {
     pub drag: Option<((f32, f32), (f32, f32))>,
     /// Convert again once converted and render while that conversion runs.
     pub reconvert: bool,
-    /// The look, and whether light instead of dark.
-    pub look: crate::desktop_ui::Look,
+    /// Whether light instead of dark.
     pub light: bool,
 }
 impl Default for Options {
@@ -235,7 +234,6 @@ impl Default for Options {
             pointer: None,
             drag: None,
             reconvert: false,
-            look: crate::desktop_ui::Look::Studio,
             light: false,
         }
     }
@@ -266,14 +264,11 @@ pub fn render(input: Option<&Path>, options: Options) -> Result<image::RgbaImage
         options.primitives,
         options.sliders,
     )?;
-    app.set_appearance(
-        options.look,
-        if options.light {
-            crate::desktop_ui::ThemeChoice::Light
-        } else {
-            crate::desktop_ui::ThemeChoice::Dark
-        },
-    );
+    app.set_appearance(if options.light {
+        crate::desktop_ui::ThemeChoice::Light
+    } else {
+        crate::desktop_ui::ThemeChoice::Dark
+    });
     if let Some(vector) = options.single_view {
         app.set_view(crate::desktop_ui::View::Overlay, vector);
     }

@@ -1,58 +1,19 @@
-//! Part of `desktop_ui`: how the window looks. Two looks after Apple's current
-//! design, asked for on September 24, 2026 ("make it feel modern, something
-//! Apple would make"), each light or dark: Studio, the opaque
-//! sidebar-and-toolbar layout of a Mac pro app and the default, and Glass,
-//! whose bars and cards float as translucent panes over the window, after
-//! Liquid Glass. The owner, September 25, 2026: Studio the default, Classic
-//! (the teal-on-charcoal design the app shipped with) gone, and Glass in plain
-//! greys ("the whole glass one feels very AI" over its purple and blue light).
-//! Every colour the window paints comes from the palette in force; the UI
-//! thread sets it once a frame (`set`), so a switch shows on the next frame.
+//! Part of `desktop_ui`: how the window looks. One design after Apple's
+//! current one (asked for on September 24, 2026: "make it feel modern,
+//! something Apple would make"), light or dark: Glass, whose bars and cards
+//! float as frosted panes over the window, after Liquid Glass. In the dark
+//! the cards are a little lighter than a flat near-black behind them, light
+//! Glass turned dark; the owner chose it on September 25, 2026 from four dark
+//! shades clicked through in the app ("Lifted should be the default theme
+//! ... that'll be the only theme"), after Classic, Studio, a gradient behind
+//! the dark panes ("not properly Apple") and the other shades went. Every
+//! colour the window paints comes from the palette in force; the UI thread
+//! sets it once a frame (`set`), so a switch shows on the next frame.
 
 use egui::{Color32, Shadow};
 use std::cell::Cell;
 
-/// The design of the window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Look {
-    Studio,
-    Glass,
-}
-
-impl Look {
-    pub const ALL: [Look; 2] = [Look::Studio, Look::Glass];
-    pub fn label(self) -> &'static str {
-        match self {
-            Look::Glass => "Glass",
-            Look::Studio => "Studio",
-        }
-    }
-    pub fn about(self) -> &'static str {
-        match self {
-            Look::Glass => {
-                "Bars and cards float as frosted glass panes over the window, after \
-                 Apple's Liquid Glass."
-            }
-            Look::Studio => {
-                "A quiet sidebar and toolbar in system grey and blue, like a Mac pro app."
-            }
-        }
-    }
-    /// The word kept in the preferences.
-    pub fn word(self) -> &'static str {
-        match self {
-            Look::Glass => "glass",
-            Look::Studio => "studio",
-        }
-    }
-    pub fn from_word(word: &str) -> Option<Look> {
-        Look::ALL
-            .into_iter()
-            .find(|look| look.word() == word.trim())
-    }
-}
-
-/// Light or dark: chosen, or the system's (the page's switch in a tab).
+/// Light or dark: chosen, or the system's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeChoice {
     Dark,
@@ -83,9 +44,9 @@ impl ThemeChoice {
     }
 }
 
-/// A patch of coloured light behind the Glass look's panes: its centre as a
-/// fraction of the window, its reach as a fraction of the window's longer
-/// side, and its colour, whose alpha is how strongly it tints.
+/// A patch of light behind the panes: its centre as a fraction of the
+/// window, its reach as a fraction of the window's longer side, and its
+/// colour, whose alpha is how strongly it tints. Only light Glass has any.
 pub(super) struct Glow {
     pub x: f32,
     pub y: f32,
@@ -95,11 +56,10 @@ pub(super) struct Glow {
 
 /// Every colour and shape the window's design decides.
 pub(super) struct Palette {
-    pub look: Look,
     pub dark: bool,
-    /// Behind everything: the canvas area.
+    /// Behind everything, showing through the rail and the canvas.
     pub backdrop: Color32,
-    /// The header, status bar and (Studio) sidebar.
+    /// The header and the status bar, panes floating over the backdrop.
     pub panel: Color32,
     /// Cards.
     pub surface: Color32,
@@ -134,17 +94,10 @@ pub(super) struct Palette {
     pub scrim: Color32,
     pub card_radius: u8,
     pub control_radius: u8,
-    /// The rim of a card; transparent for none.
+    /// The rim of a card and of the floating bars.
     pub card_stroke: Color32,
     pub card_shadow: Shadow,
     pub popup_shadow: Shadow,
-    /// The header and status bar float as rounded panes over the backdrop,
-    /// and the rail and canvas show it through (Glass).
-    pub floating: bool,
-    /// Hairlines part the bars and the sidebar from the canvas (Studio).
-    pub separators: bool,
-    /// Toolbar icons carry a button's frame at rest (off: only on hover).
-    pub framed_icons: bool,
     /// Card headings, in the title face.
     pub heading: Color32,
     pub glows: &'static [Glow],
@@ -171,124 +124,28 @@ const fn shadow(y: i8, blur: u8, alpha: u8) -> Shadow {
     }
 }
 
-/// The Glass cards' shadow: it reaches `SHADOW_REACH` px past a card's sides
-/// (half its blur), three above and nine below, which every margin around a
-/// card leaves room for. The first Glass drew 28 px of blur 10 px down, and
-/// the rail and the bars cut it off at the sides (the owner, September 25,
-/// 2026).
-const GLASS_SHADOW_DARK: Shadow = shadow(3, 12, 120);
-const GLASS_SHADOW_LIGHT: Shadow = shadow(3, 12, 30);
-/// How far past a card's sides any look's card shadow reaches.
+/// How far past a card's sides its shadow reaches: half its 12 px blur, with
+/// three above and nine below, which every margin around a card leaves room
+/// for (the first Glass drew 28 px of blur 10 px down, and the rail and the
+/// bars cut it off at the sides; the owner, September 25, 2026).
 pub(super) const SHADOW_REACH: i8 = 6;
-
-const NO_SHADOW: Shadow = Shadow {
-    offset: [0, 0],
-    blur: 0,
-    spread: 0,
-    color: Color32::TRANSPARENT,
-};
 
 // Apple's system colours (label, secondary and tertiary label, system blue,
 // green, orange and red) in their light and dark forms. Everything outside
-// the pictures in Studio dark stays darker than 60/255, which the snapshot
-// test samples.
-static STUDIO_DARK: Palette = Palette {
-    look: Look::Studio,
+// the pictures in the dark stays darker than 60/255, which the snapshot test
+// samples.
+static DARK: Palette = Palette {
     dark: true,
-    backdrop: rgb(22, 22, 24),
-    panel: rgb(32, 32, 34),
-    surface: rgb(44, 44, 47),
-    surface_high: rgb(54, 54, 58),
-    border: rgb(58, 58, 62),
-    edge: rgb(70, 70, 75),
-    chip: rgb(56, 56, 60),
-    field: rgb(28, 28, 30),
-    text: rgb(245, 245, 247),
-    label: rgb(232, 232, 237),
-    dim: rgb(160, 160, 166),
-    faint: rgb(112, 112, 118),
-    accent: rgb(10, 132, 255),
-    accent_soft: rgb(20, 60, 112),
-    on_accent: rgb(255, 255, 255),
-    ok: rgb(48, 209, 88),
-    warn: rgb(255, 159, 10),
-    err: rgb(255, 69, 58),
-    checker_light: Color32::from_gray(48),
-    checker_dark: Color32::from_gray(38),
-    hover: rgb(66, 66, 70),
-    hover_edge: rgb(86, 86, 92),
-    open: rgb(62, 62, 66),
-    knob_off: rgb(255, 255, 255),
-    popup: rgb(46, 46, 49),
-    scrim: rgba(22, 22, 24, 200),
-    card_radius: 10,
-    control_radius: 6,
-    card_stroke: Color32::TRANSPARENT,
-    card_shadow: NO_SHADOW,
-    popup_shadow: shadow(8, 24, 150),
-    floating: false,
-    separators: true,
-    framed_icons: false,
-    heading: rgb(160, 160, 166),
-    glows: &[],
-};
-
-static STUDIO_LIGHT: Palette = Palette {
-    look: Look::Studio,
-    dark: false,
-    backdrop: rgb(232, 232, 235),
-    panel: rgb(246, 246, 248),
-    surface: rgb(255, 255, 255),
-    surface_high: rgb(242, 242, 245),
-    border: rgb(216, 216, 220),
-    edge: rgb(206, 206, 211),
-    chip: rgb(234, 234, 238),
-    field: rgb(255, 255, 255),
-    text: rgb(29, 29, 31),
-    label: rgb(29, 29, 31),
-    dim: rgb(108, 108, 114),
-    faint: rgb(158, 158, 164),
-    accent: rgb(0, 122, 255),
-    accent_soft: rgb(212, 230, 255),
-    on_accent: rgb(255, 255, 255),
-    ok: rgb(36, 138, 61),
-    warn: rgb(178, 80, 0),
-    err: rgb(215, 0, 21),
-    checker_light: Color32::from_gray(255),
-    checker_dark: Color32::from_gray(234),
-    hover: rgb(226, 226, 231),
-    hover_edge: rgb(194, 194, 200),
-    open: rgb(230, 230, 235),
-    knob_off: rgb(255, 255, 255),
-    popup: rgb(255, 255, 255),
-    scrim: rgba(232, 232, 235, 200),
-    card_radius: 10,
-    control_radius: 6,
-    card_stroke: Color32::TRANSPARENT,
-    card_shadow: shadow(1, 4, 24),
-    popup_shadow: shadow(10, 30, 55),
-    floating: false,
-    separators: true,
-    framed_icons: false,
-    heading: rgb(108, 108, 114),
-    glows: &[],
-};
-
-static GLASS_DARK: Palette = Palette {
-    look: Look::Glass,
-    dark: true,
-    // Smoked glass: dark panes over a lighter, softly lit graphite, so each
-    // pane stands apart from what is behind it. Panes lighter than a dark
-    // backdrop (the first plain-grey try) sat within a few levels of it and
-    // read as mud (the owner, September 25, 2026: "looks shit in dark theme").
-    backdrop: rgb(34, 34, 38),
-    panel: rgba(16, 16, 18, 190),
-    surface: rgba(18, 18, 20, 175),
-    surface_high: rgba(255, 255, 255, 22),
-    border: rgba(255, 255, 255, 34),
+    // A flat near-black, no light behind it; the cards white at low opacity,
+    // so a little lighter than it, with crisp rims.
+    backdrop: rgb(12, 12, 14),
+    panel: rgba(255, 255, 255, 18),
+    surface: rgba(255, 255, 255, 14),
+    surface_high: rgba(255, 255, 255, 24),
+    border: rgba(255, 255, 255, 30),
     edge: rgba(255, 255, 255, 30),
-    chip: rgba(255, 255, 255, 20),
-    field: rgba(0, 0, 0, 100),
+    chip: rgba(255, 255, 255, 16),
+    field: rgba(0, 0, 0, 120),
     text: rgb(246, 246, 250),
     label: rgb(236, 236, 242),
     dim: rgb(170, 170, 176),
@@ -299,41 +156,24 @@ static GLASS_DARK: Palette = Palette {
     ok: rgb(48, 209, 88),
     warn: rgb(255, 159, 10),
     err: rgb(255, 69, 58),
-    checker_light: rgb(52, 52, 56),
-    checker_dark: rgb(40, 40, 44),
-    hover: rgba(255, 255, 255, 38),
+    checker_light: Color32::from_gray(48),
+    checker_dark: Color32::from_gray(38),
+    hover: rgba(255, 255, 255, 32),
     hover_edge: rgba(255, 255, 255, 76),
-    open: rgba(255, 255, 255, 30),
+    open: rgba(255, 255, 255, 26),
     knob_off: rgb(255, 255, 255),
-    popup: rgba(24, 24, 27, 246),
-    scrim: rgba(20, 20, 22, 190),
+    popup: rgba(34, 34, 38, 246),
+    scrim: rgba(12, 12, 14, 190),
     card_radius: 18,
     control_radius: 12,
-    card_stroke: rgba(255, 255, 255, 40),
-    card_shadow: GLASS_SHADOW_DARK,
+    card_stroke: rgba(255, 255, 255, 36),
+    card_shadow: shadow(3, 12, 150),
     popup_shadow: shadow(12, 32, 150),
-    floating: true,
-    separators: false,
-    framed_icons: true,
     heading: rgb(246, 246, 250),
-    glows: &[
-        Glow {
-            x: 0.3,
-            y: 0.,
-            reach: 0.9,
-            color: rgba(84, 84, 90, 170),
-        },
-        Glow {
-            x: 0.85,
-            y: 1.,
-            reach: 0.8,
-            color: rgba(58, 58, 64, 140),
-        },
-    ],
+    glows: &[],
 };
 
-static GLASS_LIGHT: Palette = Palette {
-    look: Look::Glass,
+static LIGHT: Palette = Palette {
     dark: false,
     backdrop: rgb(228, 228, 232),
     panel: rgba(255, 255, 255, 160),
@@ -364,11 +204,8 @@ static GLASS_LIGHT: Palette = Palette {
     card_radius: 18,
     control_radius: 12,
     card_stroke: rgba(255, 255, 255, 215),
-    card_shadow: GLASS_SHADOW_LIGHT,
+    card_shadow: shadow(3, 12, 30),
     popup_shadow: shadow(12, 32, 60),
-    floating: true,
-    separators: false,
-    framed_icons: true,
     heading: rgb(28, 28, 32),
     glows: &[
         Glow {
@@ -386,27 +223,8 @@ static GLASS_LIGHT: Palette = Palette {
     ],
 };
 
-impl Palette {
-    /// Behind the rail's cards: the backdrop, the sidebar's grey, or nothing
-    /// in front of the Glass backdrop.
-    pub fn rail_fill(&self) -> Color32 {
-        match self.look {
-            Look::Studio => self.panel,
-            Look::Glass => Color32::TRANSPARENT,
-        }
-    }
-    /// Behind the picture cards.
-    pub fn canvas_fill(&self) -> Color32 {
-        if self.floating {
-            Color32::TRANSPARENT
-        } else {
-            self.backdrop
-        }
-    }
-}
-
 thread_local! {
-    static CURRENT: Cell<&'static Palette> = const { Cell::new(&STUDIO_DARK) };
+    static CURRENT: Cell<&'static Palette> = const { Cell::new(&DARK) };
 }
 
 /// The palette in force on this thread.
@@ -414,19 +232,18 @@ pub(super) fn pal() -> &'static Palette {
     CURRENT.with(Cell::get)
 }
 
-/// The palette of `look`, light or dark.
-pub(super) fn palette(look: Look, dark: bool) -> &'static Palette {
-    match (look, dark) {
-        (Look::Glass, true) => &GLASS_DARK,
-        (Look::Glass, false) => &GLASS_LIGHT,
-        (Look::Studio, true) => &STUDIO_DARK,
-        (Look::Studio, false) => &STUDIO_LIGHT,
+/// The palette, light or dark.
+pub(super) fn palette(dark: bool) -> &'static Palette {
+    if dark {
+        &DARK
+    } else {
+        &LIGHT
     }
 }
 
-/// Put `look`, light or dark, in force; true when it changed.
-pub(super) fn set(look: Look, dark: bool) -> bool {
-    let next = palette(look, dark);
+/// Put the light or the dark palette in force; true when it changed.
+pub(super) fn set(dark: bool) -> bool {
+    let next = palette(dark);
     let changed = !std::ptr::eq(pal(), next);
     CURRENT.with(|current| current.set(next));
     changed

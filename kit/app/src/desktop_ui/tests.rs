@@ -1807,32 +1807,24 @@ fn hold_shows_the_other_picture_only_while_it_is_held() {
 
 #[test]
 fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
-    let studio = (Look::Studio, ThemeChoice::Dark, None);
-    let text = prefs::write_prefs((true, false), &Default::default(), studio);
+    let dark = (ThemeChoice::Dark, None);
+    let text = prefs::write_prefs((true, false), &Default::default(), dark);
     assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
     assert!(!text.contains("licence"));
-    assert_eq!(prefs::parse_appearance(&text), studio);
-    // The look, light or dark and the first-run answer ride along; words
-    // not understood keep the defaults.
-    let chosen = (
-        Look::Glass,
-        ThemeChoice::System,
-        Some(LicenceUse::Commercial),
-    );
+    assert_eq!(prefs::parse_appearance(&text), dark);
+    // Light or dark and the first-run answer ride along; words not
+    // understood keep the defaults.
+    let chosen = (ThemeChoice::System, Some(LicenceUse::Commercial));
     let text = prefs::write_prefs((true, false), &Default::default(), chosen);
     assert_eq!(prefs::parse_appearance(&text), chosen);
     // A free commercial trial keeps when it began.
-    let trial = (
-        Look::Studio,
-        ThemeChoice::Dark,
-        Some(LicenceUse::Trial(1_758_700_000)),
-    );
+    let trial = (ThemeChoice::Dark, Some(LicenceUse::Trial(1_758_700_000)));
     let text = prefs::write_prefs((true, false), &Default::default(), trial);
     assert!(text.contains("licence_use=trial:1758700000\r\n"), "{text}");
     assert_eq!(prefs::parse_appearance(&text), trial);
     assert_eq!(
-        prefs::parse_appearance("look=classic\ntheme=sepia\nlicence_use=maybe\n"),
-        studio
+        prefs::parse_appearance("look=studio\ntheme=sepia\nlicence_use=maybe\n"),
+        dark
     );
     // A licence rides along; a key that is not shaped like one is dropped,
     // and its certificate with it.
@@ -1840,7 +1832,7 @@ fn the_window_preferences_round_trip_and_ignore_what_they_do_not_know() {
         key: "esk_ABCDE-FGHIJ-KLMNO-PQRS1".into(),
         certificate: "payload.signature".into(),
     };
-    let text = prefs::write_prefs((true, false), &licence, studio);
+    let text = prefs::write_prefs((true, false), &licence, dark);
     assert_eq!(prefs::parse_prefs(&text, (false, true)), (true, false));
     assert_eq!(prefs::parse_licence(&text), licence);
     assert_eq!(
@@ -2081,19 +2073,17 @@ fn a_refused_typed_key_stays_out_and_a_refused_stored_one_ends_the_licence() {
 }
 
 #[test]
-fn every_look_builds_its_style_light_and_dark_and_a_frame_draws_it() {
+fn light_and_dark_build_their_style_and_a_frame_draws_it() {
     let ctx = egui::Context::default();
     let mut app = Desktop::blank(&ctx);
-    for look in Look::ALL {
-        for (theme, dark) in [(ThemeChoice::Light, false), (ThemeChoice::Dark, true)] {
-            app.set_appearance(look, theme);
-            frame_with(&ctx, &mut app, &[], &[]);
-            let style = ctx.style();
-            assert_eq!(style.visuals.dark_mode, dark, "{look:?} {theme:?}");
-            assert_eq!(pal().look, look);
-            assert_eq!(style.visuals.panel_fill, pal().backdrop);
-            assert_eq!(app.applied, Some((look, dark)));
-        }
+    for (theme, dark) in [(ThemeChoice::Light, false), (ThemeChoice::Dark, true)] {
+        app.set_appearance(theme);
+        frame_with(&ctx, &mut app, &[], &[]);
+        let style = ctx.style();
+        assert_eq!(style.visuals.dark_mode, dark, "{theme:?}");
+        assert!(std::ptr::eq(pal(), look::palette(dark)), "{theme:?}");
+        assert_eq!(style.visuals.panel_fill, pal().backdrop);
+        assert_eq!(app.applied, Some(dark));
     }
     // The popup that chooses them draws in every look.
     app.open_overlay(Overlay::Appearance, egui::pos2(600., 300.));
@@ -2158,12 +2148,12 @@ fn a_portable_copy_keeps_its_settings_beside_itself() {
     let ctx = egui::Context::default();
     let mut app = Desktop::blank(&ctx);
     app.load_prefs(path.clone().unwrap());
-    app.look = Look::Studio;
+    app.theme = ThemeChoice::Light;
     app.save_prefs();
     let mut again = Desktop::blank(&ctx);
     again.load_prefs(path.unwrap());
     let _ = std::fs::remove_dir_all(&folder);
-    assert_eq!(again.look, Look::Studio);
+    assert_eq!(again.theme, ThemeChoice::Light);
 }
 
 #[test]

@@ -7,7 +7,7 @@ impl Desktop {
         let family = self.title_family.clone();
         egui::TopBottomPanel::top("header")
             .frame(bar_frame(9, true))
-            .show_separator_line(pal().separators)
+            .show_separator_line(false)
             .show(ctx, |ui| {
                 let idle = self.idle();
                 ui.horizontal(|ui| {
@@ -196,20 +196,16 @@ impl Desktop {
     pub(super) fn rail(&mut self, ctx: &egui::Context) {
         let family = self.title_family.clone();
         let panel = egui::SidePanel::left("controls")
-            .frame(
-                egui::Frame::new()
-                    .fill(pal().rail_fill())
-                    .inner_margin(Margin {
-                        left: 12,
-                        right: SHADOW_REACH,
-                        top: 12 - SHADOW_REACH,
-                        bottom: 10,
-                    }),
-            )
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 12,
+                right: SHADOW_REACH,
+                top: 12 - SHADOW_REACH,
+                bottom: 10,
+            }))
             .resizable(true)
             .default_width(296.)
             .width_range(250.0..=400.)
-            .show_separator_line(pal().separators)
+            .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("rail-hints")
                     .frame(egui::Frame::new().inner_margin(Margin {

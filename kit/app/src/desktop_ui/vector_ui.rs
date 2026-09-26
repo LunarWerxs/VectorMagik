@@ -286,16 +286,12 @@ impl Desktop {
             shape_count(&foreign.imported)
         );
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(pal().canvas_fill())
-                    .inner_margin(Margin {
-                        left: 6,
-                        right: 12,
-                        top: 12,
-                        bottom: 12,
-                    }),
-            )
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 6,
+                right: 12,
+                top: 12,
+                bottom: 12,
+            }))
             .show(ctx, |ui| {
                 card_frame().show(ui, |ui| {
                     ui.set_min_size(ui.available_size());

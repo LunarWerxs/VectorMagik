@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.5 (September 25, 2026)
+
+- One look: Glass, with the cards a little lighter than a flat near-black in the dark
+  (no light or gradient behind them) and frosted white in the light. Appearance chooses
+  light, dark or the system's, in the browser too, where the page follows the app's
+  choice. On the website's app page the menu dropped the License badge and the theme
+  switch, and Download sits at its far right.
+
 ## 0.4.4 (September 25, 2026)
 
 - A calmer window. The toolbar shows the picture's name as its title beside Open, Convert,

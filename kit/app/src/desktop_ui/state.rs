@@ -28,8 +28,8 @@ impl Desktop {
         app.prefs_saved = (app.hold_compare, app.auto_convert);
         app.licence = prefs::parse_licence(prefs);
         app.licence_saved = app.licence.clone();
-        (app.look, app.theme, app.licence_use) = prefs::parse_appearance(prefs);
-        app.appearance_saved = (app.look, app.theme, app.licence_use);
+        (app.theme, app.licence_use) = prefs::parse_appearance(prefs);
+        app.appearance_saved = (app.theme, app.licence_use);
         app
     }
     /// Put the first-run question on screen when the preferences hold no
@@ -42,26 +42,25 @@ impl Desktop {
         self.ask_licence =
             self.licence.key.is_empty() && (self.licence_use.is_none() || trial_ended);
     }
-    /// The look, and light or dark, as the Appearance popup sets them.
-    pub fn set_appearance(&mut self, look: Look, theme: ThemeChoice) {
-        self.look = look;
+    /// Light or dark, as the Appearance popup sets it.
+    pub fn set_appearance(&mut self, theme: ThemeChoice) {
         self.theme = theme;
     }
-    /// Put the chosen look in force, light or dark: the page's switch in a
-    /// tab, Windows' setting under System, else the choice. The style is
-    /// rebuilt only when that changed.
+    /// Put light or dark in force: the choice, or under System the system's
+    /// (in a tab the page's, which follows the device). The style is rebuilt
+    /// only when that changed.
     pub(super) fn apply_appearance(&mut self, ctx: &egui::Context) {
-        let dark = match (platform::page_dark(), self.theme) {
-            (Some(dark), _) => dark,
-            (None, ThemeChoice::Dark) => true,
-            (None, ThemeChoice::Light) => false,
-            (None, ThemeChoice::System) => ctx
-                .system_theme()
-                .is_none_or(|theme| theme == egui::Theme::Dark),
+        let dark = match self.theme {
+            ThemeChoice::Dark => true,
+            ThemeChoice::Light => false,
+            ThemeChoice::System => platform::page_dark().unwrap_or_else(|| {
+                ctx.system_theme()
+                    .is_none_or(|theme| theme == egui::Theme::Dark)
+            }),
         };
-        look::set(self.look, dark);
-        if self.applied != Some((self.look, dark)) {
-            self.applied = Some((self.look, dark));
+        look::set(dark);
+        if self.applied != Some(dark) {
+            self.applied = Some(dark);
             apply_theme(ctx, self.title_family.clone());
         }
     }
@@ -82,7 +81,7 @@ impl Desktop {
         #[cfg(feature = "desktop")]
         crate::dragout::tidy();
         let title_family = install_fonts(ctx);
-        look::set(Look::Studio, true);
+        look::set(true);
         apply_theme(ctx, title_family.clone());
         let logo = render_logo(64).map(|rgba| {
             ctx.load_texture(
@@ -155,10 +154,9 @@ impl Desktop {
             ask_licence: false,
             prompt_key: false,
             licence_opened: false,
-            look: Look::Studio,
             theme: ThemeChoice::Dark,
-            appearance_saved: (Look::Studio, ThemeChoice::Dark, None),
-            applied: Some((Look::Studio, true)),
+            appearance_saved: (ThemeChoice::Dark, None),
+            applied: Some(true),
             appearance_open: false,
             appearance_anchor: egui::Rect::NOTHING,
             vector_offer: None,

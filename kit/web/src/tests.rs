@@ -167,7 +167,7 @@ fn a_file_that_is_not_a_picture_is_refused() {
 }
 
 #[test]
-fn the_pages_light_and_dark_switch_is_the_apps() {
+fn the_apps_light_or_dark_holds_and_its_system_follows_the_page() {
     // The page's event 15, as `app.mjs` sends it: the input header (time,
     // size, pixels per point, largest texture, focus, modifiers), then one
     // event.
@@ -183,18 +183,26 @@ fn the_pages_light_and_dark_switch_is_the_apps() {
         bytes.extend([15, dark]);
         assert!(crate::app::read_input(&bytes).is_some());
     };
+    // Chosen in the app (its Appearance popup, since September 25, 2026),
+    // light or dark holds whatever the page says; the page follows it
+    // (app.mjs).
     let mut tab = Tab::new(
-        "look=glass
+        "theme=dark
 ",
     );
+    theme(0);
     tab.frame(Vec::new(), Vec::new());
     assert!(tab.ctx.style().visuals.dark_mode);
+    // Under System the page's word, the device's, decides.
+    let mut tab = Tab::new(
+        "theme=system
+",
+    );
     theme(0);
     tab.frame(Vec::new(), Vec::new());
     assert!(!tab.ctx.style().visuals.dark_mode);
     theme(1);
     tab.frame(Vec::new(), Vec::new());
     assert!(tab.ctx.style().visuals.dark_mode);
-    // The page's last word is what the app reads.
     assert!(platform::page_dark() == Some(true));
 }

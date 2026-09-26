@@ -24,7 +24,7 @@ impl Desktop {
         let mut fit = false;
         egui::TopBottomPanel::bottom("status")
             .frame(bar_frame(6, false))
-            .show_separator_line(pal().separators)
+            .show_separator_line(false)
             .show(ctx, |ui| {
                 let width = ui.available_width();
                 let (show_detail, show_size) = (width >= 820., width >= 600.);
@@ -390,45 +390,24 @@ impl Desktop {
         .open_bool(&mut open)
         .show(|ui| {
             popup_heading(ui, 290., "Appearance", 14., &family);
-            ui.label(RichText::new("Look").size(12.5).color(pal().dim));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.;
-                for look in Look::ALL {
-                    if choice_width(ui, look.label(), self.look == look, 88.)
-                        .on_hover_text(look.about())
+                for theme in ThemeChoice::ALL {
+                    if choice_width(ui, theme.label(), self.theme == theme, 88.)
+                        .on_hover_text(match theme {
+                            ThemeChoice::System if platform::IN_BROWSER => {
+                                "Follow this device's light or dark setting"
+                            }
+                            ThemeChoice::System => "Follow the system's light or dark setting",
+                            ThemeChoice::Dark => "Always dark",
+                            ThemeChoice::Light => "Always light",
+                        })
                         .clicked()
                     {
-                        self.look = look;
+                        self.theme = theme;
                     }
                 }
             });
-            ui.add_space(2.);
-            ui.label(RichText::new("Light or dark").size(12.5).color(pal().dim));
-            if platform::IN_BROWSER {
-                ui.label(
-                    RichText::new(
-                        "Follows the light and dark switch at the top right of the page.",
-                    )
-                    .size(11.5)
-                    .color(pal().faint),
-                );
-            } else {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.;
-                    for theme in ThemeChoice::ALL {
-                        if choice_width(ui, theme.label(), self.theme == theme, 88.)
-                            .on_hover_text(match theme {
-                                ThemeChoice::System => "Follow Windows' light or dark setting",
-                                ThemeChoice::Dark => "Always dark",
-                                ThemeChoice::Light => "Always light",
-                            })
-                            .clicked()
-                        {
-                            self.theme = theme;
-                        }
-                    }
-                });
-            }
         });
         self.appearance_open = open;
     }

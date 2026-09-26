@@ -107,32 +107,31 @@ pub(super) fn parse_licence(text: &str) -> crate::licence::Stored {
     stored
 }
 
-/// The look, light or dark and the first-run answer kept in `text`; a line
-/// missing or not understood keeps Studio, dark, not yet asked.
-pub(super) fn parse_appearance(text: &str) -> (Look, ThemeChoice, Option<LicenceUse>) {
-    let (mut look, mut theme, mut answer) = (Look::Studio, ThemeChoice::Dark, None);
+/// Light or dark and the first-run answer kept in `text`; a line missing or
+/// not understood keeps dark, not yet asked (the `look=` of earlier versions
+/// is ignored: there is one look).
+pub(super) fn parse_appearance(text: &str) -> (ThemeChoice, Option<LicenceUse>) {
+    let (mut theme, mut answer) = (ThemeChoice::Dark, None);
     for line in text.lines() {
         match line.split_once('=') {
-            Some(("look", word)) => look = Look::from_word(word).unwrap_or(look),
             Some(("theme", word)) => theme = ThemeChoice::from_word(word).unwrap_or(theme),
             Some(("licence_use", word)) => answer = LicenceUse::from_word(word),
             _ => {}
         }
     }
-    (look, theme, answer)
+    (theme, answer)
 }
 
 pub(super) fn write_prefs(
     (hold, auto): (bool, bool),
     licence: &crate::licence::Stored,
-    (look, theme, answer): (Look, ThemeChoice, Option<LicenceUse>),
+    (theme, answer): (ThemeChoice, Option<LicenceUse>),
 ) -> String {
     let word = |on: bool| if on { "on" } else { "off" };
     let mut text = format!(
-        "hold_compare={}\r\nauto_convert={}\r\nlook={}\r\ntheme={}\r\n",
+        "hold_compare={}\r\nauto_convert={}\r\ntheme={}\r\n",
         word(hold),
         word(auto),
-        look.word(),
         theme.word()
     );
     if let Some(answer) = answer {
@@ -164,18 +163,18 @@ impl Desktop {
             (self.hold_compare, self.auto_convert) =
                 parse_prefs(&text, (self.hold_compare, self.auto_convert));
             self.licence = parse_licence(&text);
-            (self.look, self.theme, self.licence_use) = parse_appearance(&text);
+            (self.theme, self.licence_use) = parse_appearance(&text);
         }
         self.prefs_saved = (self.hold_compare, self.auto_convert);
         self.licence_saved = self.licence.clone();
-        self.appearance_saved = (self.look, self.theme, self.licence_use);
+        self.appearance_saved = (self.theme, self.licence_use);
         self.prefs = Some(path);
     }
     /// Write the preferences when one has changed; a failure costs only the
     /// memory of them, so it is not reported.
     pub(super) fn save_prefs(&mut self) {
         let now = (self.hold_compare, self.auto_convert);
-        let appearance = (self.look, self.theme, self.licence_use);
+        let appearance = (self.theme, self.licence_use);
         let changed = now != self.prefs_saved
             || self.licence != self.licence_saved
             || appearance != self.appearance_saved;
