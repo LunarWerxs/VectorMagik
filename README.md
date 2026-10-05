@@ -86,7 +86,7 @@ No download? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.
 vectormagik-cli picture.png -o picture.svg --category auto --quality auto --simplify auto
 ```
 
-The app's own chain is `--category auto --quality auto --sharpen on --simplify auto --corners on --regularize 0.8 --straighten auto --primitives on --stack on`. Run it with `--help` for every option.
+The app's own chain is `--category auto --quality auto --sharpen on --simplify auto --corners on --regularize 0.8 --straighten auto --primitives on --gradients on --stack on`. Run it with `--help` for every option.
 
 ## For AI assistants (MCP)
 

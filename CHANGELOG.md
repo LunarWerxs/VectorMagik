@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.5.19 (October 1, 2026)
+
+- Small, blurry pictures are cleaned up before they are traced. A soft JPEG logo or
+  cartoon (enlarged, blurred, saved with its color at half resolution) is first restored
+  by a small learned network, VectorMagik's own, that takes out the blur, the color
+  bleeding at edges and the JPEG's 8 x 8 blocks, at the picture's own size; the tracing
+  then follows the crisp picture. On a bird logo that came out with notches in its wing, a
+  grey patch at its neck and a dark rim in its tail, all three are gone, and soft logos
+  and cartoons trace closer to the clean pictures they were made from. It runs on artwork
+  in color whose edges are soft; crisp pictures, lettering in one ink and photographs are
+  left as they are. It is on by default (Conversion, More options, Clean up blurry
+  pictures) and adds a fraction of a second in the desktop app, two to three seconds in a
+  browser. The cleaned-up picture is a third picture to look at beside the original and
+  the vector: Cleaned up in the picture's heading, or the C key (B and V show the other
+  two).
+- Enlarge: the cleanup can also make the picture two or four times larger, sharp, and
+  trace that (Conversion, More options, Enlarge, under Clean up blurry pictures; off
+  unless chosen). Tiny details such as small lettering come out crisper, but it takes
+  about three (2x) or seven (4x) times as long, curves wave a little more and files grow;
+  for most pictures the plain cleanup gives as good a drawing. Cleaned up shows the
+  enlarged picture, and Save picture keeps it as a PNG for anyone who only wants the
+  bigger, sharper picture.
+- Reduce nodes: the Curves card has a slider that takes nodes away, with the count beside it.
+  Up to its middle the look stays the same; further right, corners and circles round off
+  too, and at the far end every shape is a blob. Where three colors meet stays put, so
+  colors never part; a many-colored picture keeps its shape longest, lettering goes first.
+- The edges of a JPEG that was sharpened for the web trace as smooth lines. Such sharpening
+  leaves a thin dark rim along one side of every edge and a light halo on the other, and
+  they came out as small bumps, spikes, slivers and steps along a logo's edges; the
+  cleanup now takes them out first.
+- Gradient logos come out as gradients. Bands of color that trace one smooth ramp (a
+  logo's orange-to-pink feather, say) are drawn as one shape filled with a real gradient
+  taken from the picture, where that matches the picture at least as well as the bands.
+  They showed as patchy bands with wandering borders before. It is on by default (Curves,
+  Gradient fills). SVG, PDF, Illustrator and EPS keep the gradients; DXF and EMF draw each
+  in its middle color. Each gradient runs to the ends of its shape, so where two meet the
+  seam is softer. And the bands are joined before the shape's outline is traced, so it is
+  one clean outline: no more notches in the edge where two bands met it, and files a fifth
+  to a half smaller.
+- Where two colors meet an outline, they now meet it exactly: zoomed in, the background no
+  longer shows through as a light hairline along the last pixel of the border between them,
+  and no sliver of color pokes past the outline as a sharp little tick (also where a shape
+  narrows to a thin point).
+- A cartoon or line drawing with photographs in it is traced as artwork: Auto called it a
+  photograph and its ink lines came out as strings of grey blots. Such a picture takes
+  longer to convert (about 20 seconds in the desktop app for a 1334 x 616 frame, about a
+  minute in a browser).
+- Artwork converts faster in the desktop app, which now shares the work between all of the
+  computer's cores: typically two to three times, up to four (that frame took about 80
+  seconds before). The result is exactly the same, to the byte.
+- In the browser, the tracing shares its heaviest work between the computer's cores too
+  (Chrome, Edge and Firefox; Safari keeps to one): a quarter to a third faster on a logo,
+  about twice as fast on a detailed cartoon. The result is exactly the same, to the byte.
+- A long conversion says so as it starts: the picture reads, for example, "A detailed
+  picture: this can take about a minute." In a browser it adds that the desktop app is
+  faster (several times, where the browser keeps to one core).
+- Black-and-white photographs, and a portrait or other photograph on a plain background,
+  are traced as photographs: they were traced as artwork, much slower and posterized.
+- The color list opens at once and scrolls normally with thousands of colors, and it takes
+  a number: type how many colors to keep next to "Reduce to" and the picture converts
+  again with that many.
+- In the browser on a phone or tablet, pinch with two fingers to zoom the result, and move
+  two fingers to pan. Pinching did nothing before.
+
 ## 0.5.18 (September 28, 2026)
 
 - The drop box says what it takes: images, and PDF, Illustrator, EPS, SVG and Photoshop
