@@ -1,5 +1,87 @@
 # Changelog
 
+## 1.0.0 (October 5, 2026)
+
+- A Windows installer. VectorMagik-windows-x64-setup.exe installs VectorMagik for you,
+  with no administrator rights: into your own user folder, with a Start-menu shortcut (a
+  desktop one if you tick it) and an entry in Settings > Apps that uninstalls it. Run a
+  newer one to update; if VectorMagik is open, it asks you to close it first. Your
+  settings and license stay in AppData through an update or an uninstall. The portable
+  zip is still there. For IT: `/S` installs silently and `/D=<folder>` picks the folder.
+- The programs carry VectorMagik's logo and its name, version and publisher, in
+  Explorer, on the taskbar and in Task Manager.
+- In the EU and the rest of the EEA, the UK and Switzerland, VectorMagik asks the first
+  time it starts whether it may keep a random ID on your computer, so your next start
+  counts as you and not as someone new. Until you say OK it keeps none; No thanks
+  deletes any it kept. Elsewhere nothing changes. The website asks the same there, with
+  a small banner.
+- Corners and points of a cleaned-up picture come out sharp. When a small, blurry
+  picture is cleaned up before it is traced, its corners and points are now judged
+  against the picture as it came in, so a feather's tip or a sun's ray ends in a point,
+  a square keeps its square corners and a letter's bar keeps square ends, where the
+  clean-up had rounded them a little.
+- Faint shapes keep their corners. The clean-up leaves alone the parts of a picture
+  that are only a few shades off their background and far from any strong edge, which
+  it used to smooth like noise: a square a few shades lighter than its ground keeps its
+  square corners and its straight sides again, and a few soft logos trace with smoother
+  outlines.
+- A paid license holds on. A firewall's or a proxy's error page during the license
+  check no longer reads as a cancelled subscription and no longer removes the key; a
+  subscription that has ended keeps working for the time already paid for; and the
+  check runs again every hour, so a window or tab left open for weeks renews too.
+- License keys paste as they come: spaces and line breaks inside the key (from an
+  email that wrapped it) and typographic dashes are forgiven. A computer whose clock
+  is wrong is told so, in place of a puzzling refusal.
+- What VectorMagik sends is said where it starts: your pictures never leave your
+  computer, and the app counts its use anonymously (that it started, and the type of
+  each file saved). The welcome screen and the License card link the new
+  [privacy](https://vectormagik.lunarwerx.com/privacy/) and
+  [terms](https://vectormagik.lunarwerx.com/terms/) pages.
+- Updates in one click. Once VectorMagik finds a newer version out on starting, it
+  offers it beside the version number at the bottom of the panel. In a copy the
+  installer put on Windows, Update now downloads the new installer, checks that it is
+  signed by LUNARWERX LLC (it runs nothing else), closes VectorMagik, installs the update
+  and opens it again; save your work first. Cancel stops the download, and a download
+  that fails changes nothing. A portable copy links to the download page.
+  `VECTORMAGIK_NO_UPDATE_CHECK=1` turns the check off.
+- Pixel art with a checker dither (two colours alternating pixel by pixel) converts
+  again. Such a picture stopped with an error about its path data under the usual
+  settings, and where it did convert, half of the checker came out in the other
+  colour. Every pixel of the checker now comes back as it is, and a lone pixel where
+  other colours meet it at its corners keeps its square instead of turning into a
+  triangle.
+- Dotted dithers keep their dots in the saved file. Where the dots' colour also
+  appears higher up in the picture (a frame or a title above a dotted area), the saved
+  SVG, PDF, EPS, EMF and DXF painted over the dots in the colour around them.
+- A package for Debian, Ubuntu and their kin: VectorMagik-linux-x64.deb installs
+  VectorMagik with `sudo apt install ./VectorMagik-linux-x64.deb` (or by opening it),
+  with an entry and its icon in the applications menu and `vectormagik` and
+  `vectormagik-cli` on the command line; `sudo apt remove vectormagik` takes it away.
+  The portable archive is still there.
+- Damaged or deliberately odd files can no longer close VectorMagik or keep it busy
+  for good. An EPS or AI file whose error handler fails as it handles, whose colour
+  functions are nested many levels deep, or whose preview claims billions of pixels; an
+  SVG whose pattern covers a vast area; a Photoshop layer said to be billions of pixels
+  wide: each is now read, or refused in plain words, at once.
+- Illustrator files saved without their procedure set keep their RGB fill colours,
+  which came out black, and a rectangle a PostScript file fills with a pattern keeps
+  the pattern.
+- An SVG shape filled with a dither pattern is laid out as tiles only when it is a
+  rectangle: a triangle filled with one was filled out to its whole box.
+- Settings and the license key are saved through a file beside them, so a computer that
+  loses power, or a USB stick pulled, during a save keeps them; a save that fails is
+  tried again.
+- An update that cannot replace one of VectorMagik's files (one a virus scanner is
+  reading) leaves the installed copy as it was, where it left it half updated.
+- The MCP tool never writes over an SVG named with a capital .SVG: its tracing goes
+  beside it, as name-traced.svg.
+- Several files dropped while VectorMagik is busy are all counted in the note that says
+  so, not just the first.
+- In the browser: a session that has used over 2 GB of memory no longer stops the app,
+  and a slow connection that takes over 30 seconds to bring the app no longer ends on a
+  blank page. On the website, a tap opens the menu (it closed again at once), and a
+  license choice made in another tab, or with storage blocked, shows everywhere.
+
 ## 0.5.19 (October 1, 2026)
 
 - Small, blurry pictures are cleaned up before they are traced. A soft JPEG logo or
