@@ -34,7 +34,7 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac 
 - ✏️ **Finish by hand.** Show the nodes, round a corner, drag or delete a node, delete or merge shapes. Ctrl+Z undoes anything.
 - 🌐 **The whole app in your browser, too.** The desktop app itself, compiled to WebAssembly: your picture never leaves your computer.
 - 📂 **Batches and vector files.** Drop several pictures at once, or open a PDF, Illustrator, SVG or Photoshop file and keep how it looks.
-- 🔒 **Offline.** No account, no upload.
+- 🔒 **Private.** No account, and your pictures never leave your computer; it works offline. It counts its use anonymously: [what it sends](https://vectormagik.lunarwerx.com/privacy/).
 - 💻 **Windows, Mac and Linux.** One folder, nothing to install; on Windows and Linux the settings stay beside the app. The Windows app is signed by LUNARWERX LLC.
 - 🎨 **Glass, light or dark.** Frosted panes after Apple's current design.
 - 🧾 **Free** for personal use under PolyForm Noncommercial; [commercial licenses](https://vectormagik.lunarwerx.com/#license) are US$9 a month per seat.
