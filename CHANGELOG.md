@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1 (October 5, 2026)
+
+- Pixel art and dithers save small with stacked shapes. Stacked shapes (how the app
+  saves by default) lay a thin strip of each colour under the edges it shares with the
+  next, so no background shows between two colours; in pixel art that was a strip round
+  every lone pixel, so a dithered picture's SVG was mostly strips (the 160 by 120 dither
+  sample: 231 KB). Where a field's colour can lie under the dots in it, the field is now
+  drawn whole beneath them (dots of a colour drawn before the field, a frame's, are
+  drawn after it instead), and the strips round lone pixels are drawn as one shape: the
+  sample's SVG is 1.1 KB, its EPS 1.4 KB and its PDF 1.2 KB (was 47 KB), and a small
+  picture of blue dots in a red field framed in blue went from 21 KB to 0.8 KB. It draws
+  the same to the pixel at full size and larger, and at small sizes with fewer pale
+  pixels between the dots.
+
 ## 1.0.0 (October 5, 2026)
 
 - A Windows installer. VectorMagik-windows-x64-setup.exe installs VectorMagik for you,
