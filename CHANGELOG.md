@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.2 (October 5, 2026)
+
+- Reducing colors merges the vector's own colors. Colors in the Conversion card (and
+  Reduce to in the colors list, and `--colors` on the command line) used to cut the
+  picture down to that many colors before tracing, which broke smooth shapes into ragged
+  bands with rims round them: a bird logo at 20 colors came out with more shapes than at
+  full color. Now the picture is traced as it is and its colors are merged afterwards:
+  the colors nearest each other, weighed by how much of the picture they cover, become
+  one, a color left on its own keeps its exact value, and shapes side by side that end
+  up one color become one shape, so the outlines are the full tracing's. A reduced
+  drawing is in flat colors. Choosing another count, or All, merges the same tracing
+  again in a moment instead of tracing the picture again.
+- Flat-topped letters keep their flat tops. In a soft photo or web copy of a logo, the
+  tracing could draw the top of a letter's stem and the corner beside it as one domed
+  curve (the top of an M where its diagonal leaves the stem), and the tops of an M, I,
+  N or T came out rounded. The corner is now found inside the curve and put back
+  square where the picture's pixels show a corner, so the tops are flat again. A curve
+  the pixels show round stays round: a circle, a round bend, a small round knob.
+
 ## 1.0.1 (October 5, 2026)
 
 - Pixel art and dithers save small with stacked shapes. Stacked shapes (how the app
