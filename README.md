@@ -72,7 +72,7 @@ No download? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.
 
 - **Simplify** removes nodes while the picture stays the same; drag it all the way and circles still come out round.
 - **Shapes**: select shapes to delete them (a background, say) or merge two shades into one.
-- **Colors and background**: limit the picture to 1 to 64 colors, or flatten transparency onto a color.
+- **Colors and background**: merge the tracing down to 1 to 64 colors, or flatten transparency onto a color.
 - **Stickers**: a die-cut outline with a white rim and an optional shadow.
 - **Save** SVG, PDF or EPS at any size, or drag the file straight out of the window.
 - **Vector and Photoshop files** open as they look: a PDF, Illustrator, EPS or SVG file keeps its text, pictures and gradients, a Photoshop file every visible layer, and a file with several pages lets you pick one.
