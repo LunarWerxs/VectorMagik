@@ -1,0 +1,37 @@
+name: Feature idea
+description: An idea for something VectorMagik could do, or do better.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. Tell us the situation you are in; we will work out the solution together.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation and the result you want, not the feature you have in mind.
+      placeholder: I want to trace a scanned pencil sketch and keep its fine lines without them breaking up.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How you imagine it working, if you have a picture of it.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: VectorMagik version (optional)
+      description: The version of the release you use, if it applies.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else (optional)

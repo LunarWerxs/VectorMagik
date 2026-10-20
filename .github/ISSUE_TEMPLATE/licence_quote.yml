@@ -1,0 +1,54 @@
+name: Commercial licence request
+description: Using VectorMagik commercially, or building it into a paid product or service.
+title: "Commercial licence request: "
+labels: ["licensing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        VectorMagik is free for noncommercial use under the PolyForm Noncommercial License 1.0.0.
+        Commercial use, including selling it or building it into a paid product or service, needs
+        a licence from LunarWerx Studios. This form starts that conversation.
+
+        Only what you type here becomes public; if you would rather not post a company name, say
+        so and we will move the conversation to email.
+
+  - type: textarea
+    id: use
+    attributes:
+      label: How would you use VectorMagik?
+      description: The product or business, and what VectorMagik would do in it.
+    validations:
+      required: true
+
+  - type: input
+    id: seats
+    attributes:
+      label: How many people or machines will use it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: payment
+    attributes:
+      label: How would you prefer to pay?
+      options:
+        - Card
+        - Purchase order / invoice
+        - Bank transfer
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: More details (optional)
+
+  - type: input
+    id: contact
+    attributes:
+      label: Where should we reply?
+      description: An email address or a Discord handle.
+    validations:
+      required: true

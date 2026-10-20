@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in VectorMagik crashes, looks wrong, or does not do what the docs say.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please check that it still happens on the
+        latest release first.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The steps, the image you converted (or a description of it), and the settings you changed.
+      placeholder: |
+        1. Drop an image into the window
+        2. Click Convert
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part of VectorMagik?
+      options:
+        - Desktop app
+        - Command line or MCP server (--mcp)
+        - Browser version
+        - Something else, or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: VectorMagik version
+      description: The version of the release you installed, or the version in kit/app/Cargo.toml for a build from source.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example Windows 11 or macOS.
+    validations:
+      required: true
+
+  - type: input
+    id: other
+    attributes:
+      label: Other software involved (optional)
+      description: For example an MCP client or a browser, with its version.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else (optional)
+      description: Screenshots or logs help. Please remove private data (file paths with your name, images you cannot share) before posting.
