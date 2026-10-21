@@ -12,6 +12,9 @@ local functions, a file read or written outside what you chose, or anything else
 exploitable) **please report it privately** rather than opening a public issue, so it can be fixed
 before it's disclosed:
 
+- **Preferred:** GitHub's private
+  **[Report a vulnerability](https://github.com/LunarWerxs/VectorMagik/security/advisories/new)**
+  (the repository's *Security, Advisories* tab), or
 - open a normal issue **asking us to contact you** (don't include the exploit details there), or
 - message the maintainers on [Discord](https://discord.gg/PsWpeNUzhk) and ask for a private
   channel.
