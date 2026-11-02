@@ -77,6 +77,7 @@ No download? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.
 - **Save** SVG, PDF or EPS at any size, or drag the file straight out of the window.
 - **Vector and Photoshop files** open as they look: a PDF, Illustrator, EPS or SVG file keeps its text, pictures and gradients, a Photoshop file every visible layer, and a file with several pages lets you pick one.
 - **Batches**: drop several files at once and they all convert with the same settings.
+- **36 languages**: the app starts in your system's language, Russian, Japanese or Arabic among them, and Appearance switches it.
 
 ## Command line
 

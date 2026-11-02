@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 (November 1, 2026)
+
+- VectorMagik speaks 36 languages: English, Arabic, Bulgarian, Chinese (Simplified and
+  Traditional), Croatian, Czech, Danish, Dutch, Filipino, Finnish, French, German, Greek,
+  Hebrew, Hindi, Hungarian, Indonesian, Italian, Japanese, Korean, Malay, Norwegian,
+  Persian, Polish, Portuguese (Brazil), Romanian, Russian, Slovak, Slovenian, Spanish,
+  Swedish, Thai, Turkish, Ukrainian and Vietnamese. The app starts in your system's
+  language (in a browser, your browser's), and Appearance, the half-moon button at the
+  top right, switches it; the choice is kept. Every language carries every word of the
+  app, counts included in each language's own plural forms, and the letters each one
+  needs come with the app, so it reads the same on Windows, macOS, Linux and in the
+  browser. The command line and the MCP server stay in English.
+
 ## 1.0.2 (October 5, 2026)
 
 - Reducing colors merges the vector's own colors. Colors in the Conversion card (and
