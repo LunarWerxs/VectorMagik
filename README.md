@@ -6,7 +6,7 @@
 
 ### Pictures in, clean vectors out.
 
-Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac or Linux, or the very same app right in your browser.
+Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac or Linux, or the very same app right in your browser. **Free for personal use.** Work use is US$9 a month per person.
 
 [![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows11&logoColor=white)](#download)
 [![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](#download)
