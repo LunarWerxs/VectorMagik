@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.1 (November 11, 2026)
+
+- No Mac download in this release: on a Mac, VectorMagik runs in the browser
+  (https://vectormagik.lunarwerx.com/app/). The Mac download returns in a later release.
+- Opening an SVG is safe: a picture inside an SVG that points at a file on your computer
+  or at a network address is no longer read; only pictures carried inside the SVG itself
+  are drawn.
+- On Windows, Open, Save as, saving the preview as PNG and choosing a batch's output
+  folder use the system's file dialogs directly, so they work on PCs that block scripts.
+- Each file of a batch is saved as soon as it is converted.
+- The engine over MCP no longer replaces an existing file unless asked to
+  (`overwrite: true`), and answers while a conversion runs.
+- Usage counts can be switched off in Appearance.
+- An installed copy accepts an update only when it is signed by LunarWerx with a
+  certificate from the expected issuer that was not revoked.
+- The installer writes every file in full before it replaces the old one, and loads
+  system libraries only from Windows' own folder.
+- A settings save that fails is tried again; a licence key the licence server refuses is
+  kept and shown as ended.
+- A damaged or hostile PDF or EPS file can no longer make the app run out of memory or
+  misread its pictures; a drawing too large to place is refused instead of saved broken
+  (PDF, EPS, DXF); a large scan with long straight edges converts with far less memory.
+- Saving as PDF is sturdier, and curve fitting does less work.
+- The programs no longer carry folder names of the computer that built them; the
+  downloads of earlier releases are withdrawn.
+
 ## 1.1.0 (November 1, 2026)
 
 - VectorMagik speaks 36 languages: English, Arabic, Bulgarian, Chinese (Simplified and
