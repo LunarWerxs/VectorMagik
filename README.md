@@ -6,9 +6,10 @@
 
 ### Pictures in, clean vectors out.
 
-Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows or Linux, or the very same app right in your browser, on a Mac too.
+Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows, Mac or Linux, or the very same app right in your browser.
 
 [![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows11&logoColor=white)](#download)
+[![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](#download)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=222)](#download)
 [![In your browser](https://img.shields.io/badge/runs%20in%20your%20browser-WebAssembly-654FF0?logo=webassembly&logoColor=white)](https://vectormagik.lunarwerx.com/app/)
 [![Built with Rust](https://img.shields.io/badge/Rust-DEA584?logo=rust&logoColor=222)](https://vectormagik.lunarwerx.com/)
@@ -16,7 +17,7 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows or Li
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange)](#licence)
 [![Discord](https://img.shields.io/badge/Discord-join_the_community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PsWpeNUzhk)
 
-**⬇ Download for** [**Windows**](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-windows-x64-setup.exe) · [**Mac** (in your browser)](https://vectormagik.lunarwerx.com/app/) · [**Linux**](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-linux-x64.deb) · [**▶ Try it in your browser**](https://vectormagik.lunarwerx.com/app/) · [Website](https://vectormagik.lunarwerx.com/)
+**⬇ Download for** [**Windows**](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-windows-x64-setup.exe) · [**macOS**](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-macos-universal.zip) · [**Linux**](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-linux-x64.deb) · [**▶ Try it in your browser**](https://vectormagik.lunarwerx.com/app/) · [Website](https://vectormagik.lunarwerx.com/)
 
 <br/>
 
@@ -48,11 +49,11 @@ Turn logos, artwork, pixel art and photos into SVG, PDF or EPS. On Windows or Li
 
 **[VectorMagik for Windows (x64)](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-windows-x64-setup.exe)**: open it and press *Install*; it installs for you alone, needs no administrator rights, updates itself in one click when a new version is out, and Settings > Apps uninstalls it. Or take the **[portable zip](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-windows-x64.zip)**: unzip it anywhere and run `VectorMagik.exe`, nothing installed. Windows may warn about an unrecognised app the first time; choose *More info* then *Run anyway*.
 
-**VectorMagik on a Mac (Apple Silicon and Intel)**: this release has no Mac download; **[open VectorMagik in your browser](https://vectormagik.lunarwerx.com/app/)**, the same app with every feature, run on your own computer. The Mac download returns in a later release.
+**[VectorMagik for macOS](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-macos-universal.zip)** (Apple Silicon and Intel, macOS 11 or newer): unzip it and move `VectorMagik.app` to Applications. It is not notarized by Apple yet, so the first time, right-click it and choose *Open*, or allow it under *System Settings*, *Privacy & Security*. The command line, `vectormagik-cli`, sits beside it.
 
 **[VectorMagik for Linux (x64)](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-linux-x64.deb)**: on Debian, Ubuntu and their kin, `sudo apt install ./VectorMagik-linux-x64.deb`, then open VectorMagik from the menu (or run `vectormagik`). Or take the **[portable archive](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-linux-x64.tar.gz)**: unpack it anywhere and run `./VectorMagik`. It runs on X11 or Wayland, on any distribution as new as Ubuntu 22.04 or Debian 12, and uses zenity or kdialog for the Open and Save dialogs.
 
-**The engine alone**, for an AI assistant or a script, without the window: [Windows](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-windows-x64.zip) · [Linux](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-linux-x64.tar.gz) ([how](#for-ai-assistants-mcp)).
+**The engine alone**, for an AI assistant or a script, without the window: [Windows](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-windows-x64.zip) · [macOS](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-macos-universal.zip) · [Linux](https://github.com/LunarWerxs/VectorMagik/releases/latest/download/VectorMagik-engine-linux-x64.tar.gz) ([how](#for-ai-assistants-mcp)).
 
 No download? **[Open VectorMagik in your browser](https://vectormagik.lunarwerx.com/app/)**: the same app, on your own computer. The desktop app adds working with no internet at all, the command line and pictures up to 100 megapixels (50 in a tab); on Windows, dragging the file straight out of the window.
 

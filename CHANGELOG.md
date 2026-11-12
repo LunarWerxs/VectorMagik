@@ -2,8 +2,6 @@
 
 ## 1.1.1 (November 11, 2026)
 
-- No Mac download in this release: on a Mac, VectorMagik runs in the browser
-  (https://vectormagik.lunarwerx.com/app/). The Mac download returns in a later release.
 - Opening an SVG is safe: a picture inside an SVG that points at a file on your computer
   or at a network address is no longer read; only pictures carried inside the SVG itself
   are drawn.
